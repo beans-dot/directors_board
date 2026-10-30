@@ -1,0 +1,9 @@
+node_modules
+dist
+dev-dist
+.firebase
+.env*
+!.env.example
+.firebaserc
+.clasp.json
+web/public/fonts/*.ttf

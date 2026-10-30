@@ -1,0 +1,42 @@
+@font-face {
+  font-family: "SCoreDream";
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/SCDream4.woff2") format("woff2");
+}
+@font-face {
+  font-family: "SCoreDream";
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/SCDream5.woff2") format("woff2");
+}
+@font-face {
+  font-family: "SCoreDream";
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/SCDream7.woff2") format("woff2");
+}
+
+:root {
+  --ink: #222;
+  --muted: #667085;
+  --line: #c5ccd6;
+  --bg: #ffffff;
+  --paper: #ffffff;
+  --paper-2: #f7f8fa;
+  --accent: #2f6fed;
+  --accent-soft: #eef4ff;
+  --nav: #e8eef8;
+  --nav-line: #c5d4ee;
+  --ok: #067647;
+  --ok-bg: #ecfdf3;
+  --warn: #b54708;
+  --warn-bg: #fffaeb;
+  --danger: #b42318;
+  --danger-bg: #fef3f2;
+  --header-h: 68px;
+  --radius: 0;
+  --font: "SCoreDream", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --left-w: 280px;
+  --memo-w: 280px;
+}

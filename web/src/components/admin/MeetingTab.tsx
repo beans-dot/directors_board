@@ -1,0 +1,248 @@
+import { useEffect, useState } from 'react';
+import { gasCall } from '../../api/client';
+import type { MeetingFolderRef } from '../../api/types';
+import { WEEKDAYS, monthGrid, shiftMonth } from '../../domain/calendar';
+import { dateKeyToFolderDate, formatMeetingLabel, todayKey } from '../../domain/folderDate';
+import { autoMeetingPlan, nextAutoRunKey } from '../../domain/krHoliday';
+import { armMeetingRefresh, messageOf, refreshTree } from '../../services/runtime';
+import { useAdmin } from '../../state/admin';
+import { useApp } from '../../state/app';
+import { Button } from '../common/Button';
+
+export function MeetingTab() {
+  const settings = useAdmin((state) => state.settings);
+  const supported = settings != null && 'meetingDate' in settings && Array.isArray(settings.dateFolders);
+  const [year, setYear] = useState(2026);
+  const [month, setMonth] = useState(1);
+  const [selected, setSelected] = useState('');
+  const [time, setTime] = useState('09:00');
+  const [ready, setReady] = useState(false);
+  const [saving, setSaving] = useState<null | 'save' | 'clear'>(null);
+  const [autoSaving, setAutoSaving] = useState(false);
+
+  useEffect(() => {
+    if (!supported || ready || !settings) return;
+    const date = settings.meetingDate || todayKey();
+    const [nextYear, nextMonth] = date.split('-').map(Number);
+    setYear(nextYear);
+    setMonth(nextMonth);
+    setSelected(date);
+    setTime(settings.meetingTime || '09:00');
+    setReady(true);
+  }, [ready, settings, supported]);
+
+  if (!settings) return <p className="help">설정을 불러오는 중</p>;
+  if (!supported) {
+    return <p className="help">회의 일시 설정은 Apps Script 배포를 새 버전으로 갱신한 뒤에 사용할 수 있습니다.</p>;
+  }
+
+  const weeks = monthGrid(year, month);
+  const folderName = dateKeyToFolderDate(selected);
+  const folders = settings.dateFolders || [];
+  const existing = folders.find((folder) => folder.dateKey === selected);
+  const currentLabel = formatMeetingLabel(settings.meetingDate || '', settings.meetingTime || '');
+  const canPrev = year > 2000 || month > 1;
+  const canNext = year < 2099 || month < 12;
+
+  const move = (delta: number) => {
+    const next = shiftMonth(year, month, delta);
+    if (next.year < 2000 || next.year > 2099) return;
+    setYear(next.year);
+    setMonth(next.month);
+  };
+
+  const save = () => {
+    const profile = useApp.getState().profile;
+    if (!profile?.adminToken || !folderName || saving) return;
+    if (!settings.rootFolderSet) {
+      useApp.getState().toast('운영 설정에서 Drive 자료 폴더를 먼저 지정해 주세요.');
+      return;
+    }
+    setSaving('save');
+    void gasCall<{ meetingDate?: string; meetingTime?: string; meetingFolder?: MeetingFolderRef | null }>(
+      'setConfig',
+      { meetingDate: selected, meetingTime: time },
+      { deviceId: profile.deviceId, adminToken: profile.adminToken },
+    )
+      .then(async (result) => {
+        const meetingFolder = result.meetingFolder;
+        const nextFolders = meetingFolder
+          ? [meetingFolder, ...folders.filter((folder) => folder.dateKey !== meetingFolder.dateKey)]
+          : folders;
+        useAdmin.getState().patch({
+          settings: {
+            ...settings,
+            meetingDate: result.meetingDate || selected,
+            meetingTime: result.meetingTime || time,
+            dateFolders: nextFolders,
+          },
+        });
+        const config = useApp.getState().config;
+        if (config) {
+          useApp.getState().patch({
+            config: { ...config, meetingDate: result.meetingDate || selected, meetingTime: result.meetingTime || time },
+          });
+          armMeetingRefresh();
+        }
+        await refreshTree('refresh');
+        useApp.getState().toast(`${folderName} 자료 폴더를 만들었습니다. Drive에서 PDF를 넣으면 됩니다.`);
+      })
+      .catch((error: unknown) => useApp.getState().toast(messageOf(error)))
+      .finally(() => setSaving(null));
+  };
+
+  const clearMeeting = () => {
+    const profile = useApp.getState().profile;
+    if (!profile?.adminToken || saving || !settings.meetingDate) return;
+    setSaving('clear');
+    void gasCall<{ meetingDate?: string; meetingTime?: string }>('setConfig', { clearMeeting: true }, {
+      deviceId: profile.deviceId,
+      adminToken: profile.adminToken,
+    })
+      .then(() => {
+        useAdmin.getState().patch({
+          settings: { ...settings, meetingDate: '', meetingTime: '' },
+        });
+        const config = useApp.getState().config;
+        if (config) {
+          useApp.getState().patch({ config: { ...config, meetingDate: '', meetingTime: '' } });
+        }
+        armMeetingRefresh();
+        useApp.getState().toast('회의 일시를 지웠습니다. 자료 폴더는 그대로 둡니다.');
+      })
+      .catch((error: unknown) => useApp.getState().toast(messageOf(error)))
+      .finally(() => setSaving(null));
+  };
+
+  const setAuto = (next: boolean) => {
+    const profile = useApp.getState().profile;
+    if (!profile?.adminToken || autoSaving || !settings) return;
+    setAutoSaving(true);
+    void gasCall<{ meetingAuto?: boolean }>('setConfig', { meetingAuto: next }, {
+      deviceId: profile.deviceId,
+      adminToken: profile.adminToken,
+    })
+      .then((result) => {
+        const meetingAuto = result.meetingAuto === true;
+        useAdmin.getState().patch({ settings: { ...settings, meetingAuto } });
+        useApp.getState().toast(meetingAuto ? '자동생성을 켰습니다.' : '자동생성을 껐습니다.');
+      })
+      .catch((error: unknown) => useApp.getState().toast(messageOf(error)))
+      .finally(() => setAutoSaving(false));
+  };
+
+  const runKey = nextAutoRunKey();
+  const autoPlan = autoMeetingPlan(runKey);
+  const runLabel = formatMeetingLabel(runKey).replace(/^회의 /, '');
+  const planLabel = autoPlan ? formatMeetingLabel(autoPlan.dateKey, autoPlan.time).replace(/^회의 /, '') : '';
+  const autoText = planLabel
+    ? `${runLabel} 오후 1시에 ${planLabel} 회의와 자료 폴더를 만듭니다.`
+    : `${runLabel} 오후 1시에는 다음 월요일이 휴일이라 만들지 않습니다.`;
+
+  return (
+    <div className="meeting-layout">
+      <div>
+        <div className="cal-nav">
+          <Button variant="line" type="button" onClick={() => move(-1)} disabled={!canPrev} aria-label="이전 달">
+            이전
+          </Button>
+          <strong>
+            {year}년 {month}월
+          </strong>
+          <Button variant="line" type="button" onClick={() => move(1)} disabled={!canNext} aria-label="다음 달">
+            다음
+          </Button>
+        </div>
+        <div className="cal-grid" role="grid" aria-label="보직회의 날짜">
+          {WEEKDAYS.map((label, index) => (
+            <div key={label} className={`cal-wd ${index === 0 ? 'sun' : ''} ${index === 6 ? 'sat' : ''}`} role="columnheader">
+              {label}
+            </div>
+          ))}
+          {weeks.flat().map((day, index) => {
+            const column = index % 7;
+            const hasFolder = folders.some((folder) => folder.dateKey === day.dateKey);
+            const on = day.dateKey === selected;
+            return (
+              <button
+                key={day.dateKey}
+                type="button"
+                role="gridcell"
+                aria-selected={on}
+                aria-label={`${day.dateKey}${hasFolder ? ', 자료 폴더 있음' : ''}`}
+                className={`cal-day ${day.inMonth ? '' : 'out'} ${column === 0 ? 'sun' : ''} ${column === 6 ? 'sat' : ''} ${on ? 'on' : ''}`}
+                onClick={() => {
+                  if (!dateKeyToFolderDate(day.dateKey)) return;
+                  setSelected(day.dateKey);
+                  if (!day.inMonth) {
+                    const [nextYear, nextMonth] = day.dateKey.split('-').map(Number);
+                    setYear(nextYear);
+                    setMonth(nextMonth);
+                  }
+                }}
+              >
+                {day.day}
+                {hasFolder && <span className="dot" />}
+              </button>
+            );
+          })}
+        </div>
+        <p className="help">점이 있는 날은 자료 폴더가 이미 있습니다.</p>
+      </div>
+      <div className="card">
+        {'meetingAuto' in settings ? (
+          <>
+            <div className="auto-row">
+              <button
+                type="button"
+                className={settings.meetingAuto ? 'switch on' : 'switch'}
+                aria-pressed={settings.meetingAuto === true}
+                aria-label="자동생성"
+                disabled={autoSaving}
+                onClick={() => setAuto(settings.meetingAuto !== true)}
+              >
+                <i />
+              </button>
+              <strong>자동생성</strong>
+            </div>
+            <p className="help">
+              켜 두면 매주 월요일 오후 1시에 다음 주 월요일 10:00 회의와 자료 폴더를 만듭니다. 그 월요일이 공휴일이나
+              대체공휴일이면 만들지 않습니다. 임시공휴일은 포함되지 않습니다.
+            </p>
+            {settings.meetingAuto && <p className="help">{autoText}</p>}
+          </>
+        ) : (
+          <p className="help">자동생성은 Apps Script 배포를 새 버전으로 갱신한 뒤에 사용할 수 있습니다.</p>
+        )}
+        <p>{currentLabel ? `현재 회의 ${currentLabel.replace(/^회의 /, '')}` : '아직 지정된 회의가 없습니다.'}</p>
+        <p>
+          선택 {folderName || '없음'}
+          {existing ? ' · 폴더 있음' : ''}
+        </p>
+        <label className="field">
+          회의 시간
+          <input type="time" value={time} onChange={(event) => setTime(event.target.value)} />
+        </label>
+        <div className="meeting-actions">
+          <Button variant="primary" type="button" onClick={save} disabled={!folderName || saving !== null || !settings.rootFolderSet}>
+            {saving === 'save' ? '만드는 중' : existing ? '이 일시로 지정' : '이 날짜 폴더 만들기'}
+          </Button>
+          {settings.meetingDate && (
+            <Button variant="danger" type="button" onClick={clearMeeting} disabled={saving !== null}>
+              {saving === 'clear' ? '지우는 중' : '회의 일시 삭제'}
+            </Button>
+          )}
+        </div>
+        {!settings.rootFolderSet && <p className="help">운영 설정에서 Drive 자료 폴더를 먼저 지정해 주세요.</p>}
+        {existing && (
+          <p>
+            <a href={existing.url} target="_blank" rel="noreferrer">
+              Drive에서 자료 넣기
+            </a>
+          </p>
+        )}
+        <p className="help">폴더 안에 본문, 별첨, 규정 폴더가 같이 만들어집니다. PDF는 나중에 Drive에서 넣으면 됩니다.</p>
+      </div>
+    </div>
+  );
+}
