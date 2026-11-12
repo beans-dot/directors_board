@@ -4,7 +4,6 @@ import type { Annotation } from '../api/types';
 import { markHex } from './colors';
 import { normalizeRotate, storedRatioToPdf, storedRatioToVisual, storedRectToPdf, type PdfBox, type PdfPoint } from './coords';
 import { pinNumberMap } from './pinNumbers';
-import { placeUnderline, type GlyphRun } from './underline';
 
 const BLUE = rgb(47 / 255, 111 / 255, 237 / 255);
 const INK = rgb(0.13, 0.13, 0.13);
@@ -101,7 +100,6 @@ export async function flattenPdf(opts: {
   bytes: Uint8Array;
   fontBytes: Uint8Array | null;
   annotations: Annotation[];
-  runsByPage?: GlyphRun[][];
 }): Promise<{ bytes: Uint8Array; failed: boolean }> {
   const active = opts.annotations.filter((ann) => ann.status === 'active');
   let pdf: PDFDocument;
@@ -132,7 +130,7 @@ export async function flattenPdf(opts: {
   for (const [pageNo, list] of byPage) {
     const page = pages[pageNo - 1];
     if (!page) continue;
-    drawPageMarks(page, font, list, overflow, opts.runsByPage?.[pageNo - 1] || []);
+    drawPageMarks(page, font, list, overflow);
   }
   if (font && overflow.length) paintOverflow(pdf, font, overflow);
   const out = await pdf.save();
@@ -159,12 +157,11 @@ function drawPageMarks(
   font: PDFFont | null,
   list: Annotation[],
   overflow: string[],
-  runs: GlyphRun[],
 ) {
   const content = cropBox(page);
   const angle = normalizeRotate(page.getRotation().angle);
   for (const ann of list) {
-    if (ann.type === 'highlight' || ann.type === 'underline') drawSpan(page, content, ann, runs);
+    if (ann.type === 'highlight' || ann.type === 'underline') drawSpan(page, content, ann);
     else if (ann.type === 'ink') drawInk(page, content, ann);
   }
   const pins = list.filter((ann) => ann.type === 'pin');
@@ -186,18 +183,15 @@ function drawPageMarks(
   drawLane(page, lane, angle, font, pins, numbers, overflow);
 }
 
-function drawSpan(page: PDFPage, box: PdfBox, ann: Annotation, runs: GlyphRun[]) {
+function drawSpan(page: PDFPage, box: PdfBox, ann: Annotation) {
   if (ann.type === 'highlight') {
     const rect = storedRectToPdf(box, ann.x, ann.y, Math.max(ann.w, 0.01), Math.max(ann.h, 0.004));
     page.drawRectangle({ ...rect, color: colorOf(ann), opacity: 0.35 });
     return;
   }
-  const spans = placeUnderline({ x: ann.x, y: ann.y, w: ann.w, h: ann.h }, runs);
-  for (const span of spans) {
-    const start = storedRatioToPdf(box, span.x, span.y);
-    const end = storedRatioToPdf(box, span.x + span.w, span.y);
-    page.drawLine({ start, end, thickness: 1.25, color: colorOf(ann) });
-  }
+  const start = storedRatioToPdf(box, ann.x, ann.y);
+  const end = storedRatioToPdf(box, ann.x + ann.w, ann.y + ann.h);
+  page.drawLine({ start, end, thickness: 1.25, color: colorOf(ann) });
 }
 
 function drawInk(page: PDFPage, box: PdfBox, ann: Annotation) {

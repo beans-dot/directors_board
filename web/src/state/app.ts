@@ -16,13 +16,19 @@ interface AppState {
   showSend: boolean;
   screen: 'main' | 'admin';
   config: PublicConfig | null;
+  usageTipLimit: number;
+  usageTipWidth: number;
   toasts: ToastItem[];
   drawerOpen: boolean;
+  folderOpen: boolean;
   memoOpen: boolean;
   menuOpen: boolean;
   lastFetchedAt: string;
   statusText: string;
   replaceNotice: string | null;
+  showPassword: boolean;
+  passwordRequired: boolean;
+  memoSyncText: string;
   patch: (partial: Partial<AppState>) => void;
   toast: (text: string) => void;
   dismiss: (id: number) => void;
@@ -40,13 +46,19 @@ export const useApp = create<AppState>((set) => ({
   showSend: false,
   screen: 'main',
   config: null,
+  usageTipLimit: 0,
+  usageTipWidth: 0,
   toasts: [],
   drawerOpen: false,
-  memoOpen: true,
+  folderOpen: true,
+  memoOpen: false,
   menuOpen: false,
   lastFetchedAt: '',
   statusText: '',
   replaceNotice: null,
+  showPassword: false,
+  passwordRequired: false,
+  memoSyncText: '',
   patch: (partial) => set(partial),
   toast: (text) => set((state) => ({ toasts: [...state.toasts, { id: toastSeq++, text }] })),
   dismiss: (id) => set((state) => ({ toasts: state.toasts.filter((item) => item.id !== id) })),

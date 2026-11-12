@@ -13,6 +13,19 @@ const TYPE_LABEL: Record<Annotation['type'], string> = {
   ink: '손글씨',
 };
 
+export function sourceFolderUrl(folderId: string): string {
+  return `https://drive.google.com/drive/folders/${encodeURIComponent(folderId)}`;
+}
+
+export function sourceFolderNote(folderId: string): { html: string; text: string } {
+  const url = sourceFolderUrl(folderId);
+  const label = '원본 자료';
+  return {
+    html: `<p>${escapeHtml(label)}<br><a href="${escapeHtml(url)}">${escapeHtml(url)}</a></p>`,
+    text: `${label}\n${url}`,
+  };
+}
+
 export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')

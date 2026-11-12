@@ -1,12 +1,13 @@
-var APP_VERSION_ = '0.12.0';
+var APP_VERSION_ = '0.22.1';
 var UUID_RE_ = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-var WRITE_ACTIONS_ = { register: 1, log: 1, adminLogin: 1, setConfig: 1 };
-var SYNC_ACTIONS_ = { tree: 1, file: 1 };
-var SYNC_QUEUE_KEY_ = 'syncQueue';
-var SYNC_BUSY_KEY_ = 'syncBusy';
-var SYNC_WAIT_MS_ = 200000;
+var WRITE_ACTIONS_ = { register: 1, log: 1, adminLogin: 1, setConfig: 1, requestTreeRefresh: 1, setChangeNotice: 1 };
+var FILE_SLOTS_ = 3;
+var FILE_SLOT_KEY_ = 'fileSlots';
+var FILE_WAIT_MS_ = 200000;
 
-function doGet() {
+function doGet(e) {
+  var params = (e && e.parameter) || {};
+  if (params.action === 'file') return serveFileGet_(params);
   return out_({ ok: true, data: { service: 'bojik', version: APP_VERSION_ } });
 }
 
@@ -19,27 +20,35 @@ function doPost(e) {
   }
   var routes = {
     config: config,
+    boot: boot,
+    pulse: pulse,
     tree: tree,
     file: file,
+    fileMeta: fileMeta,
     register: register,
     log: log,
     adminLogin: adminLogin,
     setConfig: setConfig,
+    requestTreeRefresh: requestTreeRefresh,
+    setChangeNotice: setChangeNotice,
     logs: logs,
     stage: stage,
     send: send,
     sendStatus: sendStatus,
+    materialZip: materialZip,
   };
   var fn = routes[req.action];
   if (!fn) return out_(err_('INVALID_ACTION', '알 수 없는 요청'));
   var locked = false;
   var lock = null;
+  var fileTicket = null;
   try {
     assertDeviceId_(req.deviceId);
-    if (req.action === 'setConfig' || req.action === 'logs') verifyAdminToken_(req.adminToken, req.deviceId);
+    if (req.action === 'setConfig' || req.action === 'logs' || req.action === 'requestTreeRefresh' || req.action === 'setChangeNotice') {
+      verifyAdminToken_(req.adminToken, req.deviceId);
+    }
     var payload = req.payload || {};
-    var ticket = null;
-    if (SYNC_ACTIONS_[req.action]) ticket = claimSyncTicket_();
+    if (req.action === 'file') fileTicket = claimFileSlot_();
     else if (WRITE_ACTIONS_[req.action]) {
       lock = LockService.getScriptLock();
       lock.waitLock(15000);
@@ -49,8 +58,36 @@ function doPost(e) {
   } catch (x) {
     return out_(publicError_(x));
   } finally {
-    if (ticket) releaseSyncTicket_(ticket);
+    if (fileTicket) releaseFileSlot_(fileTicket);
     if (locked && lock) lock.releaseLock();
+  }
+}
+
+function boot(payload, req) {
+  return { config: config(), tree: tree(payload || {}, req) };
+}
+
+function serveFileGet_(params) {
+  var fileTicket = null;
+  try {
+    assertDeviceId_(params.deviceId);
+    fileTicket = claimFileSlot_();
+    var payload = readFilePayload_({ fileId: params.fileId });
+    var meta = {
+      fileId: payload.fileId,
+      name: payload.name,
+      mimeType: 'application/pdf',
+      modifiedTime: payload.modifiedTime,
+      md5Checksum: payload.md5Checksum,
+      size: payload.size,
+    };
+    return ContentService.createTextOutput('BOJIKPDF1\n' + JSON.stringify(meta) + '\n' + payload.base64).setMimeType(
+      ContentService.MimeType.TEXT,
+    );
+  } catch (x) {
+    return out_(publicError_(x));
+  } finally {
+    if (fileTicket) releaseFileSlot_(fileTicket);
   }
 }
 
@@ -81,8 +118,8 @@ function withScriptLock_(fn, waitMs) {
   }
 }
 
-function readSyncQueue_() {
-  var raw = CacheService.getScriptCache().get(SYNC_QUEUE_KEY_);
+function readFileSlots_(cache) {
+  var raw = cache.get(FILE_SLOT_KEY_);
   if (!raw) return [];
   try {
     var parsed = JSON.parse(raw);
@@ -92,65 +129,53 @@ function readSyncQueue_() {
   }
 }
 
-function writeSyncQueue_(queue) {
-  var cache = CacheService.getScriptCache();
-  if (!queue.length) cache.remove(SYNC_QUEUE_KEY_);
-  else cache.put(SYNC_QUEUE_KEY_, JSON.stringify(queue), 600);
-}
-
-function claimSyncTicket_() {
+function claimFileSlot_() {
   var token = Utilities.getUuid();
-  var lock = LockService.getScriptLock();
-  lock.waitLock(15000);
-  try {
-    var queue = readSyncQueue_();
-    queue.push({ token: token, at: Date.now() });
-    writeSyncQueue_(queue);
-  } finally {
-    lock.releaseLock();
-  }
   var started = Date.now();
-  while (Date.now() - started < SYNC_WAIT_MS_) {
+  while (Date.now() - started < FILE_WAIT_MS_) {
+    var lock = null;
     var mine = false;
     try {
       lock = LockService.getScriptLock();
-      lock.waitLock(10000);
-      try {
-        var current = readSyncQueue_();
-        var cache = CacheService.getScriptCache();
-        var busy = cache.get(SYNC_BUSY_KEY_);
-        var head = current[0];
-        if (head && head.token !== token && !busy && Date.now() - Number(head.at || 0) > 45000) {
-          current.shift();
-          writeSyncQueue_(current);
-          head = current[0];
-        }
-        if (head && head.token === token && !busy) {
-          cache.put(SYNC_BUSY_KEY_, token, 300);
-          mine = true;
-        }
-      } finally {
-        lock.releaseLock();
+      lock.waitLock(8000);
+      var cache = CacheService.getScriptCache();
+      var now = Date.now();
+      var slots = readFileSlots_(cache).filter(function (slot) {
+        return now - Number(slot.at || 0) < 240000;
+      });
+      if (slots.length < FILE_SLOTS_) {
+        slots.push({ token: token, at: now });
+        cache.put(FILE_SLOT_KEY_, JSON.stringify(slots), 600);
+        mine = true;
       }
-    } catch (ignore) {}
+    } catch (ignore) {
+    } finally {
+      if (lock) {
+        try {
+          lock.releaseLock();
+        } catch (ignoreRelease) {}
+      }
+    }
     if (mine) return token;
-    Utilities.sleep(1200);
+    Utilities.sleep(700);
   }
-  releaseSyncTicket_(token);
-  fail_('BUSY', '다른 동기화를 처리하고 있습니다. 잠시 후 다시 시도해 주세요.');
+  fail_('BUSY', '다른 파일을 받는 중입니다. 잠시 후 다시 시도해 주세요.');
 }
 
-function releaseSyncTicket_(token) {
+function releaseFileSlot_(token) {
   var lock = LockService.getScriptLock();
   try {
-    lock.waitLock(10000);
+    lock.waitLock(8000);
   } catch (ignore) {
     return;
   }
   try {
     var cache = CacheService.getScriptCache();
-    if (cache.get(SYNC_BUSY_KEY_) === token) cache.remove(SYNC_BUSY_KEY_);
-    writeSyncQueue_(readSyncQueue_().filter(function (item) { return item.token !== token; }));
+    var slots = readFileSlots_(cache).filter(function (slot) {
+      return slot.token !== token;
+    });
+    if (slots.length) cache.put(FILE_SLOT_KEY_, JSON.stringify(slots), 600);
+    else cache.remove(FILE_SLOT_KEY_);
   } finally {
     lock.releaseLock();
   }

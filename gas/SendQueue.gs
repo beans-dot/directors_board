@@ -37,6 +37,10 @@ function enqueueSendJob_(payload, req) {
     folderDate: payload.folderDate,
     fileCount: payload.fileCount || 0,
     totalBytes: payload.totalBytes || 0,
+    usePack: !!payload.usePack,
+    folderId: String(payload.folderId || ''),
+    sendId: String(payload.sendId || ''),
+    replacements: payload.replacements || [],
   };
   folder.createFile(Utilities.newBlob(JSON.stringify(body), 'application/json', id + '.body.json'));
   var status = {

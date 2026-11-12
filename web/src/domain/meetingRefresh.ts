@@ -4,7 +4,8 @@ const HM_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
 export const PRELOAD_LEAD_MS = 10 * 60 * 1000;
 export const PRELOAD_INTERVAL_MS = 60 * 1000;
-export const PRELOAD_SLOTS = 10;
+/** Checks at 10, 5, and 1 minutes before the meeting. */
+export const PRELOAD_MARKS_MS = [PRELOAD_LEAD_MS, 5 * 60 * 1000, PRELOAD_INTERVAL_MS];
 
 export type MeetingPreloadPlan =
   | { phase: 'wait'; delayMs: number }
@@ -20,6 +21,22 @@ export function meetingStartMs(meetingDate: string, meetingTime: string): number
   return start;
 }
 
+/** The shared zip is prepared this long after the meeting starts. */
+export const PACK_DELAY_MS = 10 * 60 * 1000;
+
+/** Milliseconds until 10 minutes after the start. Negative once that moment has passed. */
+export function msUntilPack(now: Date, meetingDate: string, meetingTime: string): number | null {
+  const start = meetingStartMs(meetingDate, meetingTime);
+  if (start === null) return null;
+  return start + PACK_DELAY_MS - now.getTime();
+}
+
+export function packIsDue(now: Date, meetingDate?: string, meetingTime?: string): boolean {
+  if (!meetingDate || !meetingTime) return false;
+  const wait = msUntilPack(now, meetingDate, meetingTime);
+  return wait !== null && wait <= 0;
+}
+
 /** Milliseconds until one minute before the meeting in Asia/Seoul. Negative after that moment. */
 export function msUntilMeetingRefresh(now: Date, meetingDate: string, meetingTime: string): number | null {
   const start = meetingStartMs(meetingDate, meetingTime);
@@ -28,8 +45,8 @@ export function msUntilMeetingRefresh(now: Date, meetingDate: string, meetingTim
 }
 
 /**
- * From 10 minutes before the meeting through 1 minute before, one slot per minute.
- * Slot 0 is 10 minutes before. Slot 9 is the last check, 1 minute before the start.
+ * Three checks: 10, 5, and 1 minutes before the start.
+ * Opening during a gap runs the latest check that is already due, then waits for the next one.
  */
 export function meetingPreloadSchedule(
   now: Date,
@@ -39,15 +56,18 @@ export function meetingPreloadSchedule(
 ): MeetingPreloadPlan | null {
   const start = meetingStartMs(meetingDate, meetingTime);
   if (start === null) return null;
-  const open = start - PRELOAD_LEAD_MS;
   const t = now.getTime();
   if (t >= start) return { phase: 'done' };
-  if (t < open) return { phase: 'wait', delayMs: open - t };
-  const slot = Math.min(PRELOAD_SLOTS - 1, Math.floor((t - open) / PRELOAD_INTERVAL_MS));
-  const slotStartMs = open + slot * PRELOAD_INTERVAL_MS;
+  const first = start - PRELOAD_MARKS_MS[0];
+  if (t < first) return { phase: 'wait', delayMs: first - t };
+  let slot = 0;
+  for (let index = 0; index < PRELOAD_MARKS_MS.length; index += 1) {
+    if (t >= start - PRELOAD_MARKS_MS[index]) slot = index;
+  }
+  const slotStartMs = start - PRELOAD_MARKS_MS[slot];
   if (doneSlot !== slot) return { phase: 'run', slot, slotStartMs };
-  if (slot >= PRELOAD_SLOTS - 1) return { phase: 'done' };
-  return { phase: 'wait', delayMs: slotStartMs + PRELOAD_INTERVAL_MS - t };
+  if (slot >= PRELOAD_MARKS_MS.length - 1) return { phase: 'done' };
+  return { phase: 'wait', delayMs: start - PRELOAD_MARKS_MS[slot + 1] - t };
 }
 
 /** Spreads clients that share a slot so they do not all hit Drive on the same second. */

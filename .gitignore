@@ -1,4 +1,6 @@
 node_modules
+server/node_modules
+data
 dist
 dev-dist
 .firebase
@@ -7,3 +9,7 @@ dev-dist
 .firebaserc
 .clasp.json
 web/public/fonts/*.ttf
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+server/data

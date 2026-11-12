@@ -1,11 +1,11 @@
 import { useMemo, useRef, useState } from 'react';
-import type { Annotation } from '../../api/types';
+import type { Annotation, DriveNode } from '../../api/types';
 import { markHex } from '../../domain/colors';
 import { visualRatioToStored } from '../../domain/coords';
 import { topFolderOf } from '../../domain/paths';
 import { pinNumberMap } from '../../domain/pinNumbers';
-import { placeUnderline, type GlyphRun, type UnderlineSpan } from '../../domain/underline';
-import { saveMemo } from '../../services/runtime';
+import { placeUnderline } from '../../domain/underline';
+import { removeMemo, saveMemo } from '../../services/runtime';
 import { useMemoStore } from '../../state/memo';
 import { useViewer, type MemoTool } from '../../state/viewer';
 import { rectFromDrag, type RatioPoint } from './HighlightTool';
@@ -18,16 +18,21 @@ export function MemoLayer({
   rotate,
   width,
   height,
-  lines,
+  file: fileProp,
+  readOnly: readOnlyProp,
 }: {
   page: number;
   rotate: number;
   width: number;
   height: number;
-  lines: GlyphRun[];
+  file?: DriveNode | null;
+  readOnly?: boolean;
 }) {
   const allItems = useMemoStore((state) => state.items);
-  const file = useViewer((state) => state.file);
+  const viewerFile = useViewer((state) => state.file);
+  const viewerReadOnly = useViewer((state) => state.readOnly);
+  const file = fileProp === undefined ? viewerFile : fileProp;
+  const readOnly = readOnlyProp === undefined ? viewerReadOnly : readOnlyProp;
   const items = useMemo(
     () => allItems.filter((ann) => ann.driveFileId === file?.id && ann.page === page && ann.status === 'active'),
     [allItems, page, file?.id],
@@ -35,7 +40,6 @@ export function MemoLayer({
   const pinNumbers = useMemo(() => pinNumberMap(items), [items]);
   const tool = useViewer((state) => state.tool);
   const color = useViewer((state) => state.color);
-  const readOnly = useViewer((state) => state.readOnly);
   const editorId = useMemoStore((state) => state.editorId);
   const editor = items.find((ann) => ann.id === editorId && ann.type === 'pin');
   const [draft, setDraft] = useState<RatioPoint[] | null>(null);
@@ -90,8 +94,12 @@ export function MemoLayer({
   };
 
   const eraseAt = (point: RatioPoint) => {
-    const hit = hitAnnotation(items, point, width, height, lines);
+    const hit = hitAnnotation(items, point, width, height);
     if (!hit) return;
+    if (hit.type === 'pin') {
+      void removeMemo(hit);
+      return;
+    }
     void saveMemo({ ...hit, status: 'deleted', version: hit.version + 1, updatedAt: new Date().toISOString() }, 'delete');
     if (useMemoStore.getState().editorId === hit.id) useMemoStore.getState().patch({ editorId: null, activeId: null });
   };
@@ -215,11 +223,9 @@ export function MemoLayer({
           }
         }
         if (current === 'underline' && stroke && stroke.length > 1) {
-          const rect = rectFromDrag(stroke[0], point);
-          if (rect.w > 0.004 || rect.h > 0.004) {
-            for (const span of placeUnderline(rect, lines)) {
-              create({ type: 'underline', x: span.x, y: span.y, w: span.w, h: 0.0015, color }, false);
-            }
+          const line = placeUnderline(stroke[0], point);
+          if (Math.hypot(line.w, line.h) > 0.004) {
+            create({ type: 'underline', ...line, color }, false);
           }
         }
         if (current === 'ink' && stroke && stroke.length > 1) {
@@ -261,7 +267,7 @@ export function MemoLayer({
             );
           }
           if (ann.type === 'underline') {
-            return <UnderlineMarks key={ann.id} spans={spansFor(ann, lines)} width={width} height={height} color={ann.color} />;
+            return <UnderlineMark key={ann.id} ann={ann} width={width} height={height} />;
           }
           return (
             <polyline
@@ -276,7 +282,7 @@ export function MemoLayer({
             />
           );
         })}
-        {draft && draft.length > 1 && <DraftMark tool={tool} draft={draft} color={color} width={width} height={height} lines={lines} />}
+        {draft && draft.length > 1 && <DraftMark tool={tool} draft={draft} color={color} width={width} height={height} />}
       </svg>
       {editorView && editorView.page === page && (
         <MemoEditor
@@ -292,35 +298,27 @@ export function MemoLayer({
   );
 }
 
-function spansFor(ann: { x: number; y: number; w: number; h: number }, lines: GlyphRun[]): UnderlineSpan[] {
-  return placeUnderline({ x: ann.x, y: ann.y, w: ann.w, h: ann.h }, lines);
-}
-
-function UnderlineMarks({
-  spans,
+function UnderlineMark({
+  ann,
   width,
   height,
-  color,
 }: {
-  spans: UnderlineSpan[];
+  ann: { x: number; y: number; w: number; h: number; color?: string };
   width: number;
   height: number;
-  color?: string;
 }) {
-  const stroke = markHex(color);
-  return spans.map((span, index) => (
+  return (
     <line
-      key={index}
-      x1={span.x * width}
-      y1={span.y * height}
-      x2={(span.x + span.w) * width}
-      y2={span.y * height}
-      stroke={stroke}
+      x1={ann.x * width}
+      y1={ann.y * height}
+      x2={(ann.x + ann.w) * width}
+      y2={(ann.y + ann.h) * height}
+      stroke={markHex(ann.color)}
       strokeWidth={1.75}
-      strokeLinecap="butt"
+      strokeLinecap="round"
       pointerEvents="none"
     />
-  ));
+  );
 }
 
 function DraftMark({
@@ -329,14 +327,12 @@ function DraftMark({
   color,
   width,
   height,
-  lines,
 }: {
   tool: MemoTool;
   draft: RatioPoint[];
   color: string;
   width: number;
   height: number;
-  lines: GlyphRun[];
 }) {
   if (tool === 'ink') {
     return (
@@ -366,12 +362,13 @@ function DraftMark({
     );
   }
   if (tool === 'underline') {
-    return <UnderlineMarks spans={placeUnderline(rect, lines)} width={width} height={height} color={color} />;
+    const line = placeUnderline(draft[0], draft[draft.length - 1]);
+    return <UnderlineMark ann={{ ...line, color }} width={width} height={height} />;
   }
   return null;
 }
 
-function hitAnnotation(items: Annotation[], point: RatioPoint, width: number, height: number, lines: GlyphRun[]): Annotation | null {
+function hitAnnotation(items: Annotation[], point: RatioPoint, width: number, height: number): Annotation | null {
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const ann = items[index];
     if (ann.type === 'pin') {
@@ -381,10 +378,15 @@ function hitAnnotation(items: Annotation[], point: RatioPoint, width: number, he
     } else if (ann.type === 'highlight') {
       if (point.x >= ann.x - 0.004 && point.x <= ann.x + ann.w + 0.004 && point.y >= ann.y && point.y <= ann.y + Math.max(ann.h, 0.012)) return ann;
     } else if (ann.type === 'underline') {
-      const spans = spansFor(ann, lines);
-      const nearStored = point.x >= ann.x - 0.004 && point.x <= ann.x + ann.w + 0.004 && point.y >= ann.y - 0.01 && point.y <= ann.y + ann.h + 0.01;
-      const nearLine = spans.some((span) => point.x >= span.x - 0.004 && point.x <= span.x + span.w + 0.004 && Math.abs(point.y - span.y) * height < 10);
-      if (nearStored || nearLine) return ann;
+      const distance = distanceToSegment(
+        point.x * width,
+        point.y * height,
+        ann.x * width,
+        ann.y * height,
+        (ann.x + ann.w) * width,
+        (ann.y + ann.h) * height,
+      );
+      if (distance < 10) return ann;
     } else {
       const pts = ann.inkPaths?.[0] || [];
       for (const [x, y] of pts) {
@@ -395,6 +397,15 @@ function hitAnnotation(items: Annotation[], point: RatioPoint, width: number, he
     }
   }
   return null;
+}
+
+function distanceToSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const length = dx * dx + dy * dy;
+  if (length === 0) return Math.hypot(px - x1, py - y1);
+  const t = Math.min(1, Math.max(0, ((px - x1) * dx + (py - y1) * dy) / length));
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
 }
 
 function clamp(value: number) {

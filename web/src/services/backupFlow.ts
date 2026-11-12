@@ -3,7 +3,7 @@ import { listAllAnnotations, listRevisions } from '../db/annotations';
 import { listFiles } from '../db/files';
 import { kvGet, kvSet } from '../db/kv';
 import { addMemoBackup, getBackupSettings, listMemoBackups, pruneStoredBackups } from '../db/memoBackups';
-import { contentHashSource, sha256Hex, verifyBackup, withChecksum, mergeAnnotations } from '../domain/backup';
+import { contentHashSource, isDeletedMemo, sha256Hex, verifyBackup, withChecksum, mergeAnnotations } from '../domain/backup';
 import { writeAnnotation } from '../db/annotations';
 import { useApp } from '../state/app';
 import { useMemoStore } from '../state/memo';
@@ -126,7 +126,9 @@ export async function restoreBackup(payload: MemoBackupPayload): Promise<void> {
   }
   await autoBackup('before-restore');
   const current = await listAllAnnotations();
-  const incoming = payload.folders.flatMap((folder) => folder.files.flatMap((file) => file.annotations));
+  const incoming = payload.folders
+    .flatMap((folder) => folder.files.flatMap((file) => file.annotations))
+    .filter((ann) => !isDeletedMemo(ann));
   const merged = mergeAnnotations(current, incoming, new Date().toISOString());
   for (const ann of merged.annotations) await writeAnnotation(ann, 'restore');
   const openFile = useViewer.getState().file;

@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "materials": "node ../server/materials.mjs",
     "build": "tsc --noEmit && vite build",
-    "deploy:hosting": "npm run build && npx --yes firebase-tools deploy --only hosting --project directors-board --non-interactive",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { DateFolder } from '../api/types';
+import type { ChangeNotice, DateFolder } from '../api/types';
 
 interface TreeState {
   folders: DateFolder[];
@@ -11,7 +11,9 @@ interface TreeState {
   replacedIds: string[];
   seenFolderIds: string[];
   seenFileIds: string[];
+  localFiles: Record<string, true>;
   localVersion: number;
+  changeNotices: ChangeNotice[];
   patch: (partial: Partial<TreeState>) => void;
   toggle: (id: string) => void;
 }
@@ -26,7 +28,9 @@ export const useTree = create<TreeState>((set) => ({
   replacedIds: [],
   seenFolderIds: [],
   seenFileIds: [],
+  localFiles: {},
   localVersion: 0,
+  changeNotices: [],
   patch: (partial) => set(partial),
   toggle: (id) =>
     set((state) => ({

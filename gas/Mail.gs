@@ -24,6 +24,86 @@ function lockedAppendSendLog_(entry) {
   } catch (ignore) {}
 }
 
+function sendMemoKey_(sendId) {
+  return 'sent:' + sendId;
+}
+
+function readSendMemo_(sendId) {
+  if (!UUID_RE_.test(String(sendId || ''))) return null;
+  try {
+    var raw = CacheService.getScriptCache().get(sendMemoKey_(sendId));
+    return raw ? JSON.parse(raw) : null;
+  } catch (ignore) {
+    return null;
+  }
+}
+
+function writeSendMemo_(sendId, data) {
+  if (!UUID_RE_.test(String(sendId || ''))) return;
+  try {
+    CacheService.getScriptCache().put(sendMemoKey_(sendId), JSON.stringify(data), 21600);
+  } catch (ignore) {}
+}
+
+function clearInflightSend_(sendId) {
+  var memo = readSendMemo_(sendId);
+  if (!memo || memo.state !== 'inflight') return;
+  try {
+    CacheService.getScriptCache().remove(sendMemoKey_(sendId));
+  } catch (ignore) {}
+}
+
+function sentMemoResult_(memo) {
+  return { sent: true, mode: memo.mode, at: memo.at };
+}
+
+function claimOrReplaySend_(sendId) {
+  if (!UUID_RE_.test(String(sendId || ''))) return null;
+  var deadline = Date.now() + 200000;
+  while (true) {
+    var claimed = withScriptLock_(function () {
+      var memo = readSendMemo_(sendId);
+      if (memo && memo.state === 'done') return { replay: sentMemoResult_(memo) };
+      if (memo && memo.state === 'queued' && memo.jobId) return { jobId: memo.jobId };
+      if (memo && memo.state === 'inflight' && Date.now() - Number(memo.at || 0) < 360000) return { wait: true };
+      writeSendMemo_(sendId, { state: 'inflight', at: Date.now() });
+      return null;
+    }, 15000);
+    if (!claimed) return null;
+    if (claimed.replay) return claimed.replay;
+    if (claimed.jobId) {
+      try {
+        var result = sendJobResult_(claimed.jobId);
+        if (result && result.sent) return rememberSent_(sendId, result);
+        return result;
+      } catch (error) {
+        try {
+          CacheService.getScriptCache().remove(sendMemoKey_(sendId));
+        } catch (ignore) {}
+        throw error;
+      }
+    }
+    if (Date.now() >= deadline) return { queued: true, ahead: 0 };
+    Utilities.sleep(2000);
+  }
+}
+
+function rememberSent_(sendId, result) {
+  writeSendMemo_(sendId, { state: 'done', mode: result.mode || 'attach', at: result.at || isoKst_() });
+  return result;
+}
+
+function rememberQueued_(sendId, job) {
+  writeSendMemo_(sendId, { state: 'queued', jobId: job.id, at: Date.now() });
+}
+
+function finishQueued_(sendId, job) {
+  rememberQueued_(sendId, job);
+  var result = sendJobResult_(job.id);
+  if (result && result.sent) return rememberSent_(sendId, result);
+  return result;
+}
+
 function send(payload, req) {
   var to = '';
   try {
@@ -43,7 +123,7 @@ function send(payload, req) {
   }
   var mode = payload.mode === 'link' ? 'link' : 'attach';
   var total = Number(payload.totalBytes || 0);
-  if (mode === 'attach' && total > MAX_ATTACH_BYTES_) {
+  if (!payload.usePack && mode === 'attach' && total > MAX_ATTACH_BYTES_) {
     lockedAppendSendLog_({
       deviceId: req.deviceId,
       folderDate: payload.folderDate,
@@ -62,61 +142,58 @@ function send(payload, req) {
     htmlBody: payload.htmlBody,
     textBody: payload.textBody,
     mode: mode,
-    attachments: payload.attachments || [],
+    attachments: payload.usePack ? [] : payload.attachments || [],
     folderDate: payload.folderDate,
     fileCount: payload.fileCount || 0,
     totalBytes: total,
+    usePack: !!payload.usePack,
+    folderId: String(payload.folderId || ''),
+    sendId: String(payload.sendId || ''),
+    replacements: payload.usePack ? payload.replacements || [] : [],
   };
+  var sendId = String(payload.sendId || '');
+  var replay = claimOrReplaySend_(sendId);
+  if (replay) return replay;
   var job;
   try {
     job = enqueueSendJob_(normalized, req);
-  } catch (ignoreEnqueue) {
-    var inlineWorker = tryBecomeSender_();
-    if (!inlineWorker) fail_('BUSY', '다른 메일을 보내는 중입니다. 잠시 후 다시 시도해 주세요.');
+    rememberQueued_(sendId, job);
     try {
-      return sendNow_(normalized, req);
-    } finally {
-      releaseSender_(inlineWorker);
-    }
+      ensureSendDrainTrigger_();
+    } catch (ignore) {}
+    return { queued: true, jobId: job.id, ahead: 0, mode: normalized.mode };
+  } catch (error) {
+    clearInflightSend_(sendId);
+    if (error && error.code) throw error;
+    fail_('BUSY', '메일을 접수하지 못했습니다. 잠시 후 다시 시도해 주세요.');
   }
-  try {
-    ensureSendDrainTrigger_();
-  } catch (ignore) {}
-  var worker = tryBecomeSender_();
-  if (worker) {
-    try {
-      drainSendJobs_(240000, job.id);
-    } finally {
-      releaseSender_(worker);
-      if (!sendQueueHasPending_()) {
-        try {
-          removeSendDrainTrigger_();
-        } catch (ignoreRemove) {}
-      }
-    }
-  }
-  return sendJobResult_(job.id);
 }
 
 function sendNow_(payload, req) {
   var to = String(payload.to || '');
-  var mode = payload.mode === 'link' ? 'link' : 'attach';
+  var resolved = payload.usePack ? resolvePackMail_(payload, req) : null;
+  var mode = resolved ? resolved.mode : payload.mode === 'link' ? 'link' : 'attach';
   var attachments = payload.attachments || [];
-  var total = Number(payload.totalBytes || 0);
+  var total = resolved ? resolved.totalBytes : Number(payload.totalBytes || 0);
+  var htmlBody = resolved ? resolved.htmlBody : payload.htmlBody;
+  var textBody = resolved ? resolved.textBody : payload.textBody;
   var options = {
-    htmlBody: sanitizeHtml_(payload.htmlBody),
+    htmlBody: sanitizeHtml_(htmlBody),
     name: getMailFromName_(),
   };
   var alias = getMailFromAlias_();
   if (alias) options.from = alias;
   try {
     if (mode === 'attach') {
-      options.attachments = attachments.map(function (item) {
-        var name = attachmentName_(item.name);
-        return Utilities.newBlob(Utilities.base64Decode(item.base64), attachmentMime_(name), name);
-      });
+      if (resolved && resolved.blob) options.attachments = [resolved.blob];
+      else {
+        options.attachments = attachments.map(function (item) {
+          var name = attachmentName_(item.name);
+          return Utilities.newBlob(Utilities.base64Decode(item.base64), attachmentMime_(name), name);
+        });
+      }
     }
-    GmailApp.sendEmail(to, String(payload.subject || '보직회의 자료'), String(payload.textBody || ''), options);
+    GmailApp.sendEmail(to, String(payload.subject || '보직회의 자료'), String(textBody || ''), options);
     lockedAppendSendLog_({
       deviceId: req.deviceId,
       folderDate: payload.folderDate,
@@ -243,14 +320,13 @@ function logs(payload) {
   }
   if (type === 'settings') {
     var rootId = getRootFolderId_();
-    var rootName = '';
-    if (rootId) {
-      try {
-        rootName = DriveApp.getFolderById(rootId).getName();
-      } catch (ignore) {
-        rootName = '';
-      }
-    }
+    var rootName = folderLabel_(rootId);
+    var resultId = props_().getProperty('RESULT_FOLDER_ID') || '';
+    var resultName = folderLabel_(resultId);
+    var queueId = props_().getProperty('SEND_QUEUE_FOLDER_ID') || '';
+    var queueName = folderLabel_(queueId);
+    var packId = props_().getProperty('PACK_FOLDER_ID') || '';
+    var packName = folderLabel_(packId);
     var aliases = [];
     try {
       aliases = GmailApp.getAliases();
@@ -269,6 +345,12 @@ function logs(payload) {
       settings: {
         rootFolderSet: !!rootId,
         rootFolderName: rootName,
+        resultFolderSet: !!resultId,
+        resultFolderName: resultName,
+        queueFolderSet: !!queueId,
+        queueFolderName: queueName,
+        packFolderSet: !!packId,
+        packFolderName: packName,
         senderEmail: sender,
         aliases: aliases,
         mailFromName: getMailFromName_(),
@@ -278,6 +360,7 @@ function logs(payload) {
         meetingTime: meeting.meetingTime,
         meetingAuto: getMeetingAuto_(),
         dateFolders: listDateFolders_(),
+        usageTips: readUsageTips_(),
       },
     };
   }

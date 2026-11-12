@@ -13,7 +13,7 @@ interface ViewerState {
   page: number;
   pageCount: number;
   zoom: number;
-  fit: 'width' | 'page' | 'custom';
+  fit: 'width' | 'height' | 'custom' | 'single';
   tool: MemoTool;
   color: MarkColorId;
   thumbOpen: boolean;
@@ -25,6 +25,7 @@ interface ViewerState {
   findTick: number;
   loading: boolean;
   readOnly: boolean;
+  viewingKey: string;
   patch: (partial: Partial<ViewerState>) => void;
 }
 
@@ -47,5 +48,6 @@ export const useViewer = create<ViewerState>((set) => ({
   findTick: 0,
   loading: false,
   readOnly: false,
+  viewingKey: '',
   patch: (partial) => set(partial),
 }));

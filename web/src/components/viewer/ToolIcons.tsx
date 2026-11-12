@@ -136,19 +136,40 @@ export function IconEraser() {
   );
 }
 
+export function IconClearMarks() {
+  return (
+    <Svg>
+      <path d="M4 8 H12 M4 12 H14 M4 16 H10" {...stroke} />
+      <path d="M13 5.5 L19.5 12 L16.5 15 L10 8.5 Z" {...stroke} />
+    </Svg>
+  );
+}
+
 export function ToolButton({
   label,
+  hint,
   on,
+  disabled,
   onClick,
   children,
 }: {
   label: string;
+  hint?: string;
   on?: boolean;
+  disabled?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
   return (
-    <button type="button" className={`tool-btn${on ? ' on' : ''}`} title={label} aria-label={label} aria-pressed={on} onClick={onClick}>
+    <button
+      type="button"
+      className={`tool-btn${on ? ' on' : ''}`}
+      title={hint || label}
+      aria-label={label}
+      aria-pressed={on}
+      disabled={disabled}
+      onClick={onClick}
+    >
       {children}
     </button>
   );

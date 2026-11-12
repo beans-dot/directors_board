@@ -12,9 +12,11 @@ function setup() {
   if (!props_().getProperty('ADMIN_TOKEN_VERSION')) props_().setProperty('ADMIN_TOKEN_VERSION', '1');
   if (!props_().getProperty('MAIL_FROM_NAME')) props_().setProperty('MAIL_FROM_NAME', '보직회의 지원 시스템');
   if (!props_().getProperty('OFFICERS')) props_().setProperty('OFFICERS', JSON.stringify(defaultOfficers_()));
-  if (getRootFolderId_() && !props_().getProperty('RESULT_FOLDER_ID')) ensureResultFolder_();
   installCleanupTrigger_();
   syncMeetingAutoTrigger_();
+  try {
+    syncPackTrigger_(getMeeting_());
+  } catch (ignorePack) {}
   return 'ok';
 }
 

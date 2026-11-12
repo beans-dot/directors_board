@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { addDaysKey, autoMeetingPlan, isKoreanHoliday, scheduledElectionKeys, weekdayKey } from '../domain/krHoliday';
+import {
+  addDaysKey,
+  autoMeetingPlan,
+  isKoreanHoliday,
+  nextFixedMeetingDate,
+  scheduledElectionKeys,
+  weekdayKey,
+} from '../domain/krHoliday';
 
 function mondays(year: number): string[] {
   let cursor = `${year}-01-01`;
@@ -45,10 +52,21 @@ describe('korean holidays', () => {
 
   it('plans next Monday at 10:00 and skips a holiday Monday', () => {
     expect(autoMeetingPlan('2026-10-26')).toEqual({ dateKey: '2026-11-02', time: '10:00' });
+    expect(autoMeetingPlan('2026-10-26', 3, '14:00')).toEqual({
+      dateKey: '2026-10-28',
+      time: '14:00',
+    });
     expect(autoMeetingPlan('2026-11-02')).toEqual({ dateKey: '2026-11-09', time: '10:00' });
     expect(autoMeetingPlan('2026-02-09')).toBeNull();
     expect(autoMeetingPlan('2026-08-10')).toBeNull();
     expect(autoMeetingPlan('2028-10-02')).toBeNull();
     expect(autoMeetingPlan('2026-10-30')).toBeNull();
+  });
+
+  it('moves a past meeting to the next same weekday and skips a holiday', () => {
+    expect(nextFixedMeetingDate('2026-11-02', '2026-11-03')).toBe('2026-11-09');
+    expect(nextFixedMeetingDate('2026-11-02', '2026-11-02')).toBeNull();
+    expect(nextFixedMeetingDate('2026-11-09', '2026-11-03')).toBeNull();
+    expect(nextFixedMeetingDate('2026-02-09', '2026-02-10')).toBe('2026-02-23');
   });
 });

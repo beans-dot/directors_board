@@ -10,7 +10,11 @@ export interface FlatFile {
 export interface TreeDiffResult {
   newFolderIds: string[];
   newFileIds: string[];
-  replaced: Array<{ path: string; previousId: string; nextId: string; reason: 'checksum' | 'reupload' }>;
+  replaced: Array<{ path: string; previousId: string; nextId: string; reason: 'checksum' | 'reupload'; sameName: boolean }>;
+}
+
+function fileNameOf(path: string): string {
+  return path.split('/').pop() || path;
 }
 
 export function flattenFiles(nodes: DriveNode[], acc: FlatFile[] = []): FlatFile[] {
@@ -49,14 +53,20 @@ export function diffTrees(previous: DateFolder[] | null, next: DateFolder[]): Tr
           (file.md5Checksum && same.md5Checksum && file.md5Checksum !== same.md5Checksum) ||
           (file.modifiedTime && same.modifiedTime && file.modifiedTime !== same.modifiedTime);
         if (changed) {
-          replaced.push({ path: file.path, previousId: same.id, nextId: file.id, reason: 'checksum' });
+          replaced.push({
+            path: file.path,
+            previousId: same.id,
+            nextId: file.id,
+            reason: 'checksum',
+            sameName: fileNameOf(same.path) === fileNameOf(file.path),
+          });
           replacedNext.add(file.id);
         }
         continue;
       }
       const atPath = prevByPath.get(file.path);
       if (atPath && !nextIds.has(atPath.id)) {
-        replaced.push({ path: file.path, previousId: atPath.id, nextId: file.id, reason: 'reupload' });
+        replaced.push({ path: file.path, previousId: atPath.id, nextId: file.id, reason: 'reupload', sameName: true });
         replacedNext.add(file.id);
         continue;
       }

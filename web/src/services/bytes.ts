@@ -14,3 +14,15 @@ export function bytesToBase64(bytes: Uint8Array): string {
   }
   return btoa(bin);
 }
+
+/** Same encoding, but lets the screen paint while a large archive is converted. */
+export async function bytesToBase64Async(bytes: Uint8Array): Promise<string> {
+  const chunk = 0x8000;
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += chunk) {
+    const slice = bytes.subarray(i, i + chunk);
+    bin += String.fromCharCode(...slice);
+    if (i > 0 && i % (chunk * 16) === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  return btoa(bin);
+}

@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { accountLabel } from '../../domain/account';
-import { formatKoreanDate } from '../../domain/folderDate';
-import { logoutAdmin } from '../../services/runtime';
+import { logoutAdmin, messageOf, requestConnectedRefresh } from '../../services/runtime';
 import { useApp } from '../../state/app';
 import { scrollToPdfPage } from '../viewer/pageScroll';
 import { useViewer } from '../../state/viewer';
+import { UsageTipBar } from './UsageTipBar';
 
 function goFirstPage() {
   useApp.getState().patch({ screen: 'main' });
@@ -15,10 +15,81 @@ function goFirstPage() {
   window.setTimeout(scroll, 0);
 }
 
+function reloadApp() {
+  window.location.reload();
+}
+
+function UserMenu() {
+  const profile = useApp((state) => state.profile);
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  if (!profile?.name) return null;
+  return (
+    <div className="account-menu" ref={rootRef}>
+      <button
+        className="user-chip user-chip-button"
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {accountLabel(profile)}
+      </button>
+      {open && (
+        <div className="account-menu-panel" role="menu">
+          <button
+            role="menuitem"
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              useApp.getState().patch({ showPassword: true, passwordRequired: false });
+            }}
+          >
+            비밀번호 변경
+          </button>
+          <button
+            role="menuitem"
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              void logoutAdmin();
+            }}
+          >
+            로그아웃
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Header() {
   const profile = useApp((state) => state.profile);
-  const menuOpen = useApp((state) => state.menuOpen);
   const [logoFailed, setLogoFailed] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshAll = () => {
+    setRefreshing(true);
+    void requestConnectedRefresh()
+      .catch((error: unknown) => useApp.getState().toast(messageOf(error)))
+      .finally(() => setRefreshing(false));
+  };
   return (
     <header className="header">
       <div className="brand">
@@ -27,62 +98,41 @@ export function Header() {
         </button>
         <span className="brand-divider" />
         <h1>
-          <button className="brand-home" type="button" onClick={goFirstPage}>
+          <button
+            className="brand-home"
+            type="button"
+            onClick={() => {
+              if (profile?.role === 'admin') {
+                useApp.getState().patch({ screen: 'main' });
+                return;
+              }
+              reloadApp();
+            }}
+          >
             보직회의 지원 시스템
           </button>
         </h1>
       </div>
-      <div className="header-date">{formatKoreanDate()}</div>
+      <div className="usage-tip-slot">
+        <UsageTipBar />
+      </div>
       <div className="header-meta">
+        <UserMenu />
         {profile?.role === 'admin' && (
-          <button className="btn btn-line btn-sm" type="button" onClick={() => useApp.getState().patch({ screen: 'admin', menuOpen: false })}>
+          <button className="btn btn-line btn-sm" type="button" onClick={() => useApp.getState().patch({ screen: 'admin' })}>
             관리
           </button>
         )}
-        {profile?.name && (
-          <div className="user-menu">
-            <button className="user-chip" type="button" onClick={() => useApp.getState().patch({ menuOpen: !menuOpen })}>
-              {accountLabel(profile)}
-            </button>
-            {menuOpen && (
-              <div className="menu">
-                {profile.role !== 'admin' && (
-                  <button type="button" onClick={() => useApp.getState().patch({ showOnboarding: true, menuOpen: false })}>
-                    보직 다시 선택
-                  </button>
-                )}
-                {profile.role !== 'admin' && (
-                  <button type="button" onClick={() => useApp.getState().patch({ showAdminConvert: true, menuOpen: false })}>
-                    admin으로 변환
-                  </button>
-                )}
-                {profile.role === 'admin' && (
-                  <button type="button" onClick={() => useApp.getState().patch({ screen: 'admin', menuOpen: false })}>
-                    관리 화면
-                  </button>
-                )}
-                {profile.role === 'admin' && (
-                  <button type="button" onClick={() => void logoutAdmin()}>
-                    관리자 해제
-                  </button>
-                )}
-                <button type="button" onClick={() => useApp.getState().patch({ showBackup: true, menuOpen: false })}>
-                  메모 백업
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const ok = navigator.storage?.persisted?.();
-                    void Promise.resolve(ok).then((value) =>
-                      useApp.getState().toast(value ? '브라우저 저장소가 유지됩니다.' : '브라우저 데이터를 지우지 마세요'),
-                    );
-                  }}
-                >
-                  저장공간 정보
-                </button>
-              </div>
-            )}
-          </div>
+        {profile?.role === 'admin' && (
+          <button
+            className="btn btn-line btn-sm"
+            type="button"
+            disabled={refreshing}
+            title="열어 둔 화면이 자료 폴더를 확인하고, 아직 받지 않은 PDF를 받습니다."
+            onClick={refreshAll}
+          >
+            전체새로고침
+          </button>
         )}
       </div>
     </header>

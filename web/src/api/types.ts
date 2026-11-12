@@ -7,6 +7,17 @@ export interface Officer {
   position: string;
   name: string;
   email: string;
+  employeeNo?: string;
+  mustChangePassword?: boolean;
+  ready?: boolean;
+}
+
+export interface LoginLock {
+  key: string;
+  kind: 'account' | 'address';
+  name: string;
+  position: string;
+  lockedUntil: number;
 }
 
 export interface DriveNode {
@@ -34,6 +45,7 @@ export interface Profile {
   position: string;
   role: Role;
   officerId?: string;
+  mustChangePassword?: boolean;
   adminToken?: string;
   adminTokenExp?: number;
   savedEmail?: string;
@@ -174,6 +186,11 @@ export interface MeetingFolderRef {
   url: string;
 }
 
+export interface ChangeNotice {
+  fileId: string;
+  path: string;
+}
+
 export interface PublicConfig {
   today: FolderDate;
   maxAttachBytes: number;
@@ -181,11 +198,19 @@ export interface PublicConfig {
   officers?: Officer[];
   meetingDate?: string;
   meetingTime?: string;
+  changeNotices?: ChangeNotice[];
+  usageTips?: string[];
 }
 
 export interface AdminSettings {
   rootFolderSet: boolean;
   rootFolderName: string;
+  resultFolderSet?: boolean;
+  resultFolderName?: string;
+  queueFolderSet?: boolean;
+  queueFolderName?: string;
+  packFolderSet?: boolean;
+  packFolderName?: string;
   senderEmail: string;
   aliases: string[];
   mailFromName: string;
@@ -194,7 +219,28 @@ export interface AdminSettings {
   meetingDate?: string;
   meetingTime?: string;
   meetingAuto?: boolean;
+  meetingAutoWeekday?: number;
+  meetingAutoTime?: string;
   dateFolders?: MeetingFolderRef[];
+  meetings?: MeetingRecord[];
+  usageTips?: string[];
+}
+
+export interface MeetingFileRecord {
+  id: string;
+  name: string;
+  category: string;
+  sortOrder: number;
+  size: number;
+}
+
+export interface MeetingRecord {
+  id: string;
+  dateKey: string;
+  folderDate: string;
+  time: string;
+  title: string;
+  files: MeetingFileRecord[];
 }
 
 export interface DeviceRow {

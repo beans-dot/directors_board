@@ -1,0 +1,22 @@
+[Unit]
+Description=보직회의 자료 API
+After=network.target
+
+[Service]
+Type=simple
+User=depthm
+Group=depthm
+WorkingDirectory=/var/www/depthm-app
+Environment=NODE_ENV=production
+Environment=PORT=8787
+Environment=MATERIALS_DIR=/var/www/depthm-data/materials
+Environment=DEPTHM_DB=/var/www/depthm-data/depthm.sqlite
+Environment=DEPTHM_FONT=/var/www/depthm-app/web/public/fonts/NanumGothic-Regular.ttf
+EnvironmentFile=-/etc/depthm/api.env
+ExecStart=/usr/bin/node server/api.mjs
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

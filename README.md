@@ -1,112 +1,88 @@
 # 보직회의 지원 시스템
 
-Admin이 Google Drive에 날짜 폴더와 PDF를 올리면, 보직자는 로그인 없이 자료를 보고 그 기기에만 메모를 남깁니다. `회의종료 및 자료전송`을 누르면 메모를 입힌 PDF와 요약을 본인 `@yeonsung.ac.kr` 메일로 받습니다.
+관리자가 웹 화면에서 회의를 만들고 PDF를 올리면, 보직자는 직위와 이름을 고른 뒤 비밀번호로 로그인합니다. 메모는 계정별로 서버에 남고, 다른 PC에서 같은 계정으로 들어가면 그 메모가 다시 열립니다. 내려받기는 그 계정의 메모를 원본 PDF에 입혀 저장합니다. 메일은 보내지 않습니다.
 
-화면은 Firebase Hosting, 서버는 Google Apps Script입니다. 유료 기능은 쓰지 않습니다.
+운영 화면은 `https://depthm.yeonsung.ac.kr/` 입니다. nginx가 `web/dist`를 보여주고, `/materials-api/`는 같은 서버의 `127.0.0.1:8787`로 넘깁니다. Firebase와 Google Apps Script는 이 화면의 동작에 쓰이지 않습니다. 깃 푸시만으로는 화면이 바뀌지 않습니다.
 
-주소는 보직자에게만 알려 주세요. 검색엔진에 올리지 않습니다.
+자료 파일은 `/var/www/depthm-data/materials`, 데이터베이스는 그 옆의 `depthm.sqlite`입니다. 이 폴더는 nginx 문서 루트가 아닙니다.
 
 ## 로컬 실행
 
 ```bash
 cd web
-cp .env.example .env.local
 npm install
 npm run fetch-font
 npm run dev
 ```
 
-`.env.local`의 `VITE_GAS_URL`에 Apps Script 웹앱 `/exec` 주소를 넣습니다. 비어 있으면 화면은 열리지만 자료 폴더를 불러오지 않습니다.
+다른 터미널에서 자료 API를 띄웁니다. 개발용 자료 폴더는 `server/data/materials`이고, 데이터베이스는 그 옆의 `depthm.sqlite`입니다.
+
+```bash
+cd server
+npm install
+node api.mjs
+```
+
+`web`에서 `npm run dev`를 하면 Vite가 `/materials-api`를 `127.0.0.1:8787`로 넘깁니다.
 
 확인:
 
 ```bash
+cd web
 npm run typecheck
 npm run lint
 npm test
 npm run build
 ```
 
-## 운영자가 넣는 값
-
-코드와 이 문서에는 실제 비밀값을 적지 않습니다. Apps Script 편집기 > 프로젝트 설정 > 스크립트 속성에 넣습니다.
-
-| 키 | 필수 | 설명 |
-|---|---|---|
-| `ADMIN_PASSWORD` | 예 | Admin 전환 비밀번호. Drive·메일 계정 비밀번호가 아닙니다. |
-| `SHEET_ID` | 예 | 기록용 스프레드시트 ID |
-| `ROOT_FOLDER_ID` | 나중에 가능 | 자료 루트 폴더 ID. 비워 두고 Admin 화면에서 저장해도 됩니다. |
-| `RESULT_FOLDER_ID` | 아니오 | 25MB 초과 발송 파일 폴더. 없으면 `setup` 또는 첫 발송 때 만듭니다. |
-| `TOKEN_SECRET` | 자동 | `setup`이 만듭니다. |
-| `MAIL_FROM_NAME` | 아니오 | 메일 표시 이름. Admin 화면에서 바꿉니다. |
-| `MAIL_FROM_ALIAS` | 아니오 | 배포 계정에 등록된 별칭만. |
-
-메일은 **웹앱을 배포한 구글 계정**으로 나갑니다. 다른 계정으로 보내려면 그 계정으로 Apps Script를 다시 배포합니다. Admin 화면에는 그 주소가 읽기 전용으로 보이고, 표시 이름과 별칭만 바꿀 수 있습니다.
-
-받는 주소는 `@yeonsung.ac.kr`만 허용됩니다. 이 규칙은 설정으로 바꾸지 않습니다.
-
-## Apps Script 배포
-
-1. 자료를 올릴 Google 계정으로 [script.google.com](https://script.google.com)에 로그인하고 프로젝트를 만듭니다.
-2. `gas/`의 `.gs` 파일을 같은 이름으로 붙여 넣습니다. 매니페스트를 표시한 뒤 `gas/appsscript.json`으로 바꿉니다.
-3. Drive API(v3)가 켜져 있는지 확인합니다.
-4. 스크립트 속성에 `ADMIN_PASSWORD`, `SHEET_ID`를 넣습니다. 폴더 ID는 지금 넣거나 Admin 화면에 맡겨도 됩니다.
-5. 함수 `setup`을 실행하고 Drive, Sheets, Gmail, 트리거 권한을 승인합니다. 시트 탭 4개, `TOKEN_SECRET`, 매일 03:00 정리 트리거가 만들어집니다.
-6. 배포 > 새 배포 > 웹 앱. 실행 계정은 나, 액세스 권한은 모든 사용자(Anyone)입니다.
-7. `/exec` 주소가 `{"ok":true,"data":{"service":"bojik",...}}`이면 됩니다.
-8. 코드를 고친 뒤에는 배포 관리에서 새 버전으로 갱신합니다. 주소는 유지됩니다.
-
-clasp를 쓸 때는 `gas/.clasp.json.example`을 `.clasp.json`으로 복사해 `<SCRIPT_ID>`를 넣고 `clasp push`합니다. `.clasp.json`은 저장소에 올리지 않습니다.
-
-## Firebase Hosting
-
-Spark(무료)만 사용합니다. Blaze, Cloud Functions, Firestore, Storage는 쓰지 않습니다.
-
 ```bash
-cd web
-cp .env.example .env.production
-# VITE_GAS_URL=<웹앱 /exec URL>
-npm install
-npm run build
-cd ..
-cp .firebaserc.example .firebaserc
-# default 프로젝트 ID를 입력
-firebase deploy --only hosting
+cd server
+node --test materials.test.mjs api.test.mjs
 ```
 
-배포 주소는 보직자에게만 전달합니다.
+## 로그인
 
-## Admin이 Drive에 올리는 법
+보직자는 관리 화면의 보직자 관리에 등록합니다. 사번이 첫 비밀번호입니다. 처음 로그인하면 비밀번호를 바꿔야 자료를 볼 수 있습니다. 이후에는 그 비밀번호로 들어갑니다. 비밀번호는 scrypt로 데이터베이스에만 저장합니다.
 
-1. 루트 폴더 아래 `26.11.06.`처럼 날짜 폴더를 만듭니다. 연도는 두 자리이고, 끝의 점은 없어도 됩니다.
-2. 그 안에 `본문`, `별첨`, `규정` 폴더를 만들고 PDF만 올립니다.
-3. 파일명 앞 번호(`1_`, `2_`)가 정렬 순서입니다.
-4. 자료를 고칠 때는 `1_예산안_수정.pdf`처럼 다른 이름이 원칙입니다. 같은 이름 덮어쓰기도 감지되어 메모가 옮겨지지만 권장하지 않습니다.
+관리자는 로그인 화면의 `admin으로 들어가기`에서 비밀번호를 입력합니다. 처음 비밀번호는 `admin`이고, 처음 로그인하면 비밀번호를 바꿔야 관리 화면을 쓸 수 있습니다. 이후에는 이름 메뉴에서 비밀번호를 바꿉니다. 보직자 비밀번호를 사번으로 되돌리는 기능은 관리 화면에 있습니다.
 
-보직자에게는 같은 브라우저를 쓰고, 브라우저 데이터를 지우지 말라고 안내합니다. 새 폴더가 안 보이면 자료 폴더 오른쪽 ↻을 누릅니다.
+다섯 번 연속으로 틀리면 15분 동안 그 계정과 그 주소의 로그인이 멈춥니다.
 
-Admin 기기는 첫 화면 또는 사용자 메뉴의 `admin으로 변환`에서 `ADMIN_PASSWORD`를 입력합니다. 틀려도 잠기지 않고, 횟수 제한도 없습니다. Admin 화면에서 회의 일시, 접속 현황, 발송 기록, 자료 폴더, 발신 표시를 바꿉니다.
+## 운영 서버
 
-비밀번호를 바꾸려면 Script Property `ADMIN_PASSWORD`를 수정합니다. 이미 발급된 Admin 토큰까지 끊으려면 `ADMIN_TOKEN_VERSION` 숫자를 올립니다.
+이 저장소만으로는 대학 서버에 올라간 상태가 아닙니다. 서버 관리자가 아래를 수행해야 화면과 API가 바뀝니다.
 
-## 한글 폰트
+1. Node.js 24 이상이 있는 계정 `depthm`을 만들고, 이 저장소를 `/var/www/depthm-app`에 둡니다.
+2. `/var/www/depthm-data/materials`를 만들고 소유자를 `depthm`으로 합니다. 다른 사용자는 읽지 못하게 합니다.
+3. 관리자 비밀번호는 데이터베이스에 저장됩니다. 서버를 처음 열면 비밀번호는 `admin`이고, 로그인 후 바꿉니다.
+4. `cd web && npm install && npm run fetch-font && npm run build` 후 `web/dist` 내용물을 `/var/www/depthm`에 덮어씁니다.
+5. `cd server && npm install`
+6. `deploy/systemd/depthm-api.service`를 `/etc/systemd/system/`에 두고 `systemctl enable --now depthm-api`를 실행합니다.
+7. `deploy/nginx/depthm.conf`의 `/materials-api/` 프록시와 `X-Forwarded-Proto`를 반영한 뒤 `nginx -t`와 reload를 합니다. 자료 폴더를 `alias`로 열지 않습니다.
+8. `NODE_ENV=production`이면 자료 폴더를 쓸 수 없으면 프로세스가 시작하지 않습니다. 개발 폴더로 바꾸지 않습니다.
 
-화면 글꼴 SCoreDream은 `web/public/fonts`에 있습니다. PDF에 메모를 입힐 때 쓰는 정적 TTF는 저장소에 넣지 않습니다.
+서비스 확인:
 
 ```bash
-cd web
-npm run fetch-font
+systemctl status depthm-api
+journalctl -u depthm-api -n 100 --no-pager
 ```
 
-`web/public/fonts/NanumGothic-Regular.ttf`가 없으면 자료전송 때 "한글 폰트 파일이 없습니다"가 나옵니다.
+## 백업과 복구
 
-로고는 `web/public/assets/logo.png`입니다. 파일이 없으면 "연성대학교" 글자가 대신 나옵니다.
+```bash
+cd /var/www/depthm-app
+node server/backup.mjs /var/www/depthm-data/backups/수동
+```
 
-## 문제 해결
+백업 폴더에는 `depthm.sqlite`와 `materials`가 함께 있습니다. 삭제된 원본은 `materials/.trash`에 있습니다.
 
-- 자료 폴더가 비어 있고 설정 안내가 보이면 Admin 운영 설정에 Drive 폴더 주소가 없는 것입니다.
-- 폴더를 저장했는데 못 연다고 하면, 웹앱을 배포한 계정이 그 폴더를 볼 수 있는지 확인합니다.
-- 메일이 다른 사람 주소로 나가지 않습니다. 보내는 계정은 배포 계정입니다.
-- `@yeonsung.ac.kr`이 아닌 주소는 화면과 서버 모두에서 거절됩니다.
-- 오프라인이면 받아 둔 PDF와 메모만 열립니다. 자료전송은 인터넷이 필요합니다.
-- 회의 일시를 저장해 두면, 웹앱을 연 순간부터(보직을 고르기 전 로그인 화면 포함) 회의 10분 전부터 시작 1분 전까지 1분마다 자료 목록을 확인합니다. 그 날짜의 PDF 중 아직 없거나 바뀐 파일만 미리 받아 둡니다. 그 시각에 앱이 꺼져 있었으면 다음에 열 때 받습니다. HWP, 엑셀 등 PDF가 아닌 파일은 목록에 나오지 않습니다.
+복구할 때는 서비스를 멈추고, 백업의 데이터베이스 파일과 `materials` 폴더를 원래 자리에 덮어쓴 다음 서비스를 다시 시작합니다. 웹 화면만 다시 배포해도 메모와 자료는 지워지지 않습니다.
+
+## 메모와 자료
+
+메모는 PDF에 바로 합치지 않고, 사용자 ID·회의·파일 ID 기준으로 데이터베이스에 저장합니다. 저장이 실패하면 화면에 알리고 그 브라우저에 남겨 두어 다시 보낼 수 있습니다. 같은 메모를 두 화면에서 고치면 먼저 저장된 쪽을 유지하고, 나중에 저장한 화면에서 덮어쓸지 서버 내용을 불러올지 고릅니다.
+
+자료를 삭제하면 원본은 `.trash`로 옮겨지고 메모 행은 남습니다. 자료를 교체하면 같은 파일 ID에 새 PDF가 들어가고 메모도 남습니다. 페이지 구성이 바뀌면 메모 위치가 어긋날 수 있습니다. 내려받기와 메모 저장은 원본 파일을 수정하지 않습니다.
+
+같은 날짜에 회의가 여러 개일 수 있습니다. 폴더 이름은 `26.11.12.`이고, 그 안에 회의 ID 폴더가 따로 있습니다.

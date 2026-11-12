@@ -2,6 +2,16 @@ import type { DateFolder, DriveNode } from '../api/types';
 
 const collator = new Intl.Collator('ko', { numeric: true, sensitivity: 'base' });
 
+/** 별첨 이름이 `[부서명`으로 시작할 때의 나열 순서. 산학 자료는 산학협력단으로도 시작합니다. */
+const ATTACHMENT_OFFICES = [
+  ['기획처'],
+  ['교무처'],
+  ['입학홍보처'],
+  ['학생취업처'],
+  ['산학협력처', '산학협력단'],
+  ['행정지원처'],
+];
+
 export function naturalCompare(a: string, b: string): number {
   const aNum = /^\d/.test(a);
   const bNum = /^\d/.test(b);
@@ -13,12 +23,27 @@ export function sortByName<T>(items: T[], nameOf: (item: T) => string): T[] {
   return items.slice().sort((a, b) => naturalCompare(nameOf(a), nameOf(b)));
 }
 
-function isDateFolder(node: DriveNode): node is DateFolder {
-  return 'folderDate' in node && Boolean((node as DateFolder).folderDate);
+function attachmentOfficeRank(name: string): number {
+  const trimmed = name.trim();
+  const bracket = trimmed.startsWith('[') || trimmed.startsWith('［');
+  if (!bracket) return ATTACHMENT_OFFICES.length;
+  const body = trimmed.slice(1).trimStart();
+  const index = ATTACHMENT_OFFICES.findIndex((names) => names.some((office) => body.startsWith(office)));
+  return index === -1 ? ATTACHMENT_OFFICES.length : index;
 }
 
-function isMeetingPdf(node: DriveNode): boolean {
-  return node.kind === 'file' && node.isPdf && node.name.replace(/\s+/g, '').includes('보직회의자료');
+function compareAttachmentNames(a: string, b: string): number {
+  const rank = attachmentOfficeRank(a) - attachmentOfficeRank(b);
+  if (rank !== 0) return rank;
+  return naturalCompare(a, b);
+}
+
+function sortAttachments(nodes: DriveNode[]): DriveNode[] {
+  return nodes.slice().sort((a, b) => compareAttachmentNames(a.name, b.name));
+}
+
+function isDateFolder(node: DriveNode): node is DateFolder {
+  return 'folderDate' in node && Boolean((node as DateFolder).folderDate);
 }
 
 function hasAnyFile(node: DriveNode): boolean {
@@ -28,25 +53,20 @@ function hasAnyFile(node: DriveNode): boolean {
 
 function keepMaterialFolder(node: DriveNode): boolean {
   const name = node.name.trim();
-  if (node.kind === 'folder' && (name === '별첨' || name === '규정')) return hasAnyFile(node);
+  if (node.kind === 'folder' && (name === '본문' || name === '별첨' || name === '규정')) return hasAnyFile(node);
   return true;
 }
 
 function arrangeMeetingChildren(children: DriveNode[]): DriveNode[] {
-  const meeting: DriveNode[] = [];
   const rest: DriveNode[] = [];
+  let body: DriveNode | undefined;
   let attachment: DriveNode | undefined;
   let regulation: DriveNode | undefined;
 
   for (const node of children) {
     const name = node.name.trim();
     if (node.kind === 'folder' && name === '본문') {
-      const kept: DriveNode[] = [];
-      for (const child of node.children ?? []) {
-        if (isMeetingPdf(child)) meeting.push(child);
-        else kept.push(child);
-      }
-      if (kept.length) rest.push({ ...node, children: kept });
+      if (hasAnyFile(node)) body = node;
       continue;
     }
     if (node.kind === 'folder' && name === '별첨') {
@@ -57,15 +77,11 @@ function arrangeMeetingChildren(children: DriveNode[]): DriveNode[] {
       if (hasAnyFile(node)) regulation = node;
       continue;
     }
-    if (isMeetingPdf(node)) {
-      meeting.push(node);
-      continue;
-    }
     rest.push(node);
   }
 
   return [
-    ...sortByName(meeting, (item) => item.name),
+    ...(body ? [body] : []),
     ...(attachment ? [attachment] : []),
     ...(regulation ? [regulation] : []),
     ...sortByName(rest, (item) => item.name),
@@ -84,6 +100,7 @@ function sortNode(node: DriveNode): DriveNode {
   if (!visible.children) return visible;
   const children = visible.children.map(sortNode).filter(keepMaterialFolder);
   if (isDateFolder(visible)) return { ...visible, children: arrangeMeetingChildren(children) };
+  if (visible.name.trim() === '별첨') return { ...visible, children: sortAttachments(children) };
   return { ...visible, children: sortByName(children, (item) => item.name) };
 }
 

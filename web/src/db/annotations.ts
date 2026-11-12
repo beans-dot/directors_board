@@ -44,6 +44,30 @@ export async function listAllAnnotations(): Promise<Annotation[]> {
   return db.getAll('annotations');
 }
 
+export async function deleteAnnotation(id: string): Promise<void> {
+  await deleteAnnotations([id]);
+}
+
+export async function deleteAnnotations(ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  const db = await getDB();
+  const gone = new Set(ids);
+  const tx = db.transaction(['annotations', 'annotationRevisions'], 'readwrite');
+  for (const id of ids) await tx.objectStore('annotations').delete(id);
+  let cursor = await tx.objectStore('annotationRevisions').openCursor();
+  while (cursor) {
+    if (gone.has(cursor.value.annotationId)) await cursor.delete();
+    cursor = await cursor.continue();
+  }
+  await tx.done;
+}
+
+export async function purgeDeletedMemos(): Promise<number> {
+  const ids = (await listAllAnnotations()).filter((ann) => ann.type === 'pin' && ann.status === 'deleted').map((ann) => ann.id);
+  await deleteAnnotations(ids);
+  return ids.length;
+}
+
 export async function listRevisions(annotationId: string): Promise<AnnotationRevision[]> {
   const db = await getDB();
   return db.getAllFromIndex('annotationRevisions', 'byAnnotation', annotationId);

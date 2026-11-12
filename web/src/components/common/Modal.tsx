@@ -12,7 +12,7 @@ export function Modal({ title, children, onClose }: { title: string; children: R
             </button>
           )}
         </div>
-        {children}
+        <div className="modal-body">{children}</div>
       </div>
     </div>
   );

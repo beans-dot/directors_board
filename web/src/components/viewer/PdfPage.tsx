@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import type { PDFDocumentProxy } from 'pdfjs-dist';
-import type { GlyphRun } from '../../domain/underline';
-import { glyphRunsOnPage } from '../../services/pdf';
+import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import { MemoLayer } from '../memo/MemoLayer';
 import { useViewer } from '../../state/viewer';
 import { clearPageVisibility, markPageFromObserver, notePageVisibility, scrollFindHit } from './pageScroll';
+
+function renderWasCancelled(error: unknown): boolean {
+  return error instanceof Error && error.name === 'RenderingCancelledException';
+}
 
 export function PdfPage({ doc, pageNumber, scale }: { doc: PDFDocumentProxy; pageNumber: number; scale: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -14,7 +16,7 @@ export function PdfPage({ doc, pageNumber, scale }: { doc: PDFDocumentProxy; pag
   const [near, setNear] = useState(Math.abs(pageNumber - useViewer.getState().page) <= 2);
   const visible = near || Math.abs(pageNumber - viewerPage) <= 1;
   const [box, setBox] = useState({ width: 0, height: 0, rotate: 0 });
-  const [lines, setLines] = useState<GlyphRun[]>([]);
+  const renderTaskRef = useRef<RenderTask | null>(null);
 
   useEffect(() => {
     const node = wrapRef.current;
@@ -45,27 +47,47 @@ export function PdfPage({ doc, pageNumber, scale }: { doc: PDFDocumentProxy; pag
     let cancel = false;
     void (async () => {
       const page = await doc.getPage(pageNumber);
+      if (cancel) return;
       const ratio = Math.min(window.devicePixelRatio || 1, 2);
       const viewport = page.getViewport({ scale: scale * ratio });
-      const canvas = canvasRef.current;
-      if (!canvas || cancel) return;
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      const context = canvas.getContext('2d');
-      if (!context) return;
-      await page.render({ canvasContext: context, viewport }).promise;
       const cssWidth = viewport.width / ratio;
       const cssHeight = viewport.height / ratio;
+      const canvas = canvasRef.current;
+      if (!canvas || cancel) return;
+      // pdf.js flips the page upright once, on this canvas. Resizing or drawing again before that
+      // finishes clears the flip and leaves the page upside down.
+      const previous = renderTaskRef.current;
+      if (previous) {
+        try {
+          await previous.promise;
+        } catch (error) {
+          if (!renderWasCancelled(error) && !cancel) throw error;
+        }
+        if (renderTaskRef.current === previous) renderTaskRef.current = null;
+      }
+      if (cancel || canvasRef.current !== canvas) return;
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
       canvas.style.width = `${cssWidth}px`;
       canvas.style.height = `${cssHeight}px`;
-      const runs = await glyphRunsOnPage(page);
-      if (!cancel) {
-        setBox({ width: cssWidth, height: cssHeight, rotate: page.rotate });
-        setLines(runs);
+      const context = canvas.getContext('2d');
+      if (!context || cancel) return;
+      setBox({ width: cssWidth, height: cssHeight, rotate: page.rotate });
+      const task = page.render({ canvasContext: context, viewport });
+      renderTaskRef.current = task;
+      try {
+        await task.promise;
+      } catch (error) {
+        if (cancel || renderWasCancelled(error)) return;
+        throw error;
+      } finally {
+        if (renderTaskRef.current === task) renderTaskRef.current = null;
       }
+      if (cancel) return;
     })();
     return () => {
       cancel = true;
+      renderTaskRef.current?.cancel();
     };
   }, [doc, pageNumber, scale, visible]);
 
@@ -80,10 +102,15 @@ export function PdfPage({ doc, pageNumber, scale }: { doc: PDFDocumentProxy; pag
   }, [findTick, box.width, box.height, pageNumber]);
 
   return (
-    <div className="pdf-page" ref={wrapRef} id={`pdf-page-${pageNumber}`} style={{ width: box.width || '100%' }}>
+    <div
+      className="pdf-page"
+      ref={wrapRef}
+      id={`pdf-page-${pageNumber}`}
+      style={box.width > 0 ? { width: box.width, height: box.height } : undefined}
+    >
       <canvas ref={canvasRef} />
       <FindMarks pageNumber={pageNumber} width={box.width} height={box.height} />
-      {box.width > 0 && <MemoLayer page={pageNumber} rotate={box.rotate} width={box.width} height={box.height} lines={lines} />}
+      {box.width > 0 && <MemoLayer page={pageNumber} rotate={box.rotate} width={box.width} height={box.height} />}
     </div>
   );
 }

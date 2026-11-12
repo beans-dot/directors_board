@@ -3,6 +3,16 @@ import { VitePWA } from 'vite-plugin-pwa';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  server: {
+    host: '::',
+    port: 5173,
+    proxy: {
+      '/materials-api': {
+        target: 'http://127.0.0.1:8787',
+        rewrite: (requestPath) => requestPath.replace(/^\/materials-api/, ''),
+      },
+    },
+  },
   plugins: [
     react(),
     VitePWA({

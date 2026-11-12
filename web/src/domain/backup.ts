@@ -1,5 +1,9 @@
 import type { Annotation, AnnotationRevision, MemoBackupPayload, MemoBackupRecord } from '../api/types';
 
+export function isDeletedMemo(ann: Pick<Annotation, 'type' | 'status'>): boolean {
+  return ann.type === 'pin' && ann.status === 'deleted';
+}
+
 export const DEFAULT_RETENTION_DAYS = 90;
 export const DEFAULT_MAX_BACKUP_BYTES = 50 * 1024 * 1024;
 
@@ -74,6 +78,32 @@ export function mergeAnnotations(
     });
   }
   return { annotations: [...byId.values()], revisions, counts };
+}
+
+export function dropDeletedMemos(payload: MemoBackupPayload): {
+  payload: Omit<MemoBackupPayload, 'checksum'>;
+  removed: number;
+} {
+  let removed = 0;
+  const folders = payload.folders
+    .map((folder) => {
+      const files = folder.files
+        .map((file) => {
+          const gone = new Set(file.annotations.filter((ann) => isDeletedMemo(ann)).map((ann) => ann.id));
+          if (!gone.size) return file;
+          removed += gone.size;
+          return {
+            ...file,
+            annotations: file.annotations.filter((ann) => !gone.has(ann.id)),
+            revisions: file.revisions.filter((rev) => !gone.has(rev.annotationId)),
+          };
+        })
+        .filter((file) => file.annotations.length > 0 || file.revisions.length > 0);
+      return { ...folder, files };
+    })
+    .filter((folder) => folder.files.length > 0);
+  const { checksum: _checksum, ...rest } = payload;
+  return { payload: { ...rest, folders }, removed };
 }
 
 function stripId(ann: Annotation): Omit<Annotation, 'id'> {

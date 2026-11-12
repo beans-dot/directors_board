@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { AccessRow, AdminSettings, DeviceRow, SendLogRow } from '../api/types';
 
 interface AdminState {
-  tab: 'meeting' | 'access' | 'send' | 'ops' | 'officers';
+  tab: 'meeting' | 'materials' | 'access' | 'send' | 'officers' | 'tips';
   devices: DeviceRow[];
   access: AccessRow[];
   sends: SendLogRow[];
@@ -12,7 +12,7 @@ interface AdminState {
 }
 
 export const useAdmin = create<AdminState>((set) => ({
-  tab: 'meeting',
+  tab: 'materials',
   devices: [],
   access: [],
   sends: [],

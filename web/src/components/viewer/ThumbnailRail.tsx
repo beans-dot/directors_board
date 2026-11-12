@@ -1,10 +1,24 @@
 import { useEffect, useState } from 'react';
+import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { useViewer } from '../../state/viewer';
 
-export function ThumbnailRail() {
-  const doc = useViewer((state) => state.doc);
-  const page = useViewer((state) => state.page);
-  const open = useViewer((state) => state.thumbOpen);
+export function ThumbnailRail({
+  doc: docProp,
+  page: pageProp,
+  open: openProp,
+  onPage,
+}: {
+  doc?: PDFDocumentProxy | null;
+  page?: number;
+  open?: boolean;
+  onPage?: (page: number) => void;
+} = {}) {
+  const storeDoc = useViewer((state) => state.doc);
+  const storePage = useViewer((state) => state.page);
+  const storeOpen = useViewer((state) => state.thumbOpen);
+  const doc = docProp === undefined ? storeDoc : docProp;
+  const page = pageProp === undefined ? storePage : pageProp;
+  const open = openProp === undefined ? storeOpen : openProp;
   const [urls, setUrls] = useState<string[]>([]);
   useEffect(() => {
     if (!doc || !open) return;
@@ -32,7 +46,17 @@ export function ThumbnailRail() {
   return (
     <div className="thumb-rail">
       {urls.map((url, index) => (
-        <button key={`${index}-${url.slice(0, 16)}`} type="button" className={page === index + 1 ? 'on' : ''} title={`${index + 1}쪽`} aria-label={`${index + 1}쪽`} onClick={() => useViewer.getState().patch({ page: index + 1 })}>
+        <button
+          key={`${index}-${url.slice(0, 16)}`}
+          type="button"
+          className={page === index + 1 ? 'on' : ''}
+          title={`${index + 1}쪽`}
+          aria-label={`${index + 1}쪽`}
+          onClick={() => {
+            if (onPage) onPage(index + 1);
+            else useViewer.getState().patch({ page: index + 1 });
+          }}
+        >
           <img src={url} alt="" />
           <span>{index + 1}</span>
         </button>

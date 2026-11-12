@@ -1,5 +1,5 @@
 import type { MemoBackupRecord } from '../api/types';
-import { selectBackupsToDelete, type PruneItem } from '../domain/backup';
+import { dropDeletedMemos, selectBackupsToDelete, withChecksum, type PruneItem } from '../domain/backup';
 import { getDB } from './schema';
 
 export async function addMemoBackup(record: MemoBackupRecord): Promise<void> {
@@ -23,6 +23,29 @@ export async function getBackupSettings(): Promise<{ retentionDays: number; maxT
     retentionDays: settings?.retentionDays ?? 90,
     maxTotalBytes: settings?.maxTotalBytes ?? 50 * 1024 * 1024,
   };
+}
+
+export async function purgeDeletedMemosFromBackups(): Promise<number> {
+  const db = await getDB();
+  const rows = await db.getAll('memoBackups');
+  let removed = 0;
+  for (const row of rows) {
+    const next = dropDeletedMemos(row.data);
+    if (!next.removed) continue;
+    removed += next.removed;
+    const data = await withChecksum(next.payload);
+    const annotationCount = data.folders.reduce(
+      (sum, folder) => sum + folder.files.reduce((fileSum, file) => fileSum + file.annotations.length, 0),
+      0,
+    );
+    await db.put('memoBackups', {
+      ...row,
+      data,
+      annotationCount,
+      sizeBytes: new TextEncoder().encode(JSON.stringify(data)).length,
+    });
+  }
+  return removed;
 }
 
 export async function pruneStoredBackups(now = Date.now()): Promise<string[]> {

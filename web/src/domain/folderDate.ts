@@ -50,7 +50,28 @@ export function folderDateToKey(folderDate: string): string {
   return parseFolderDate(folderDate)?.dateKey ?? folderDate;
 }
 
+/** 전체 회의자료를 한 번에 받을 때 저장되는 압축 파일 이름입니다. */
+export function meetingZipName(dateKey: string, folderDate = ''): string {
+  const key = /^\d{4}-\d{2}-\d{2}$/.test(dateKey) ? dateKey : folderDateToKey(folderDate);
+  const dotted = /^\d{4}-\d{2}-\d{2}$/.test(key) ? key.replace(/-/g, '.') : folderDate.replace(/\.$/, '') || '자료';
+  return `${dotted} 보직회의자료.zip`;
+}
+
 const WEEKDAY_KO = ['일', '월', '화', '수', '목', '금', '토'] as const;
+
+/** 2026-11-12, 2026.11.12, 26.11.12. 같은 입력을 날짜 키로 맞춘다. */
+export function parseDateInput(raw: string): string | null {
+  const text = raw.trim();
+  const full = /^(\d{4})[-./](\d{1,2})[-./](\d{1,2})\.?$/.exec(text);
+  const short = /^(\d{2})[-./](\d{1,2})[-./](\d{1,2})\.?$/.exec(text);
+  const match = full || short;
+  if (!match) return null;
+  const year = full ? Number(match[1]) : 2000 + Number(match[1]);
+  const month = String(Number(match[2])).padStart(2, '0');
+  const day = String(Number(match[3])).padStart(2, '0');
+  const dateKey = `${year}-${month}-${day}`;
+  return dateKeyToFolderDate(dateKey) ? dateKey : null;
+}
 
 export function dateKeyToFolderDate(dateKey: string): string | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
@@ -60,7 +81,12 @@ export function dateKeyToFolderDate(dateKey: string): string | null {
   const day = Number(match[3]);
   if (year < 2000 || year > 2099 || month < 1 || month > 12) return null;
   const probe = new Date(Date.UTC(year, month - 1, day));
-  if (probe.getUTCFullYear() !== year || probe.getUTCMonth() !== month - 1 || probe.getUTCDate() !== day) return null;
+  if (
+    probe.getUTCFullYear() !== year ||
+    probe.getUTCMonth() !== month - 1 ||
+    probe.getUTCDate() !== day
+  )
+    return null;
   return `${String(year).slice(-2)}.${match[2]}.${match[3]}.`;
 }
 

@@ -4,6 +4,42 @@ function getMeetingAuto_() {
   return props_().getProperty('MEETING_AUTO') === '1';
 }
 
+function nextFixedMeetingDate_(meetingDate, today) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(meetingDate) || !/^\d{4}-\d{2}-\d{2}$/.test(today)) return '';
+  if (meetingDate >= today) return '';
+  var cursor = meetingDate;
+  var step;
+  for (step = 0; step < 60; step++) {
+    cursor = addDaysKey_(cursor, 7);
+    if (Number(String(cursor).slice(0, 4)) > 2040) return '';
+    if (cursor >= today && !isKoreanHoliday_(cursor)) return cursor;
+  }
+  return '';
+}
+
+function rollMeetingIfPast_() {
+  var current = props_().getProperty('MEETING_DATE') || '';
+  var today = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd');
+  if (!nextFixedMeetingDate_(current, today)) return;
+  withScriptLock_(function () {
+    var again = props_().getProperty('MEETING_DATE') || '';
+    var todayNow = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd');
+    var fixed = nextFixedMeetingDate_(again, todayNow);
+    if (!fixed) return;
+    try {
+      folderMetaFromKey_(fixed);
+    } catch (ignoreFolder) {
+      return;
+    }
+    props_().setProperty('MEETING_DATE', fixed);
+    if (!props_().getProperty('MEETING_TIME')) props_().setProperty('MEETING_TIME', '10:00');
+    try {
+      clearTreeCache_();
+    } catch (ignoreCache) {}
+    logAuto_(fixed + ' 회의일 갱신');
+  }, 15000);
+}
+
 function autoMeetingPlan_(runMondayKey) {
   if (weekdayKey_(runMondayKey) !== 1) return null;
   var next = addDaysKey_(runMondayKey, 7);
@@ -58,15 +94,17 @@ function createNextMeetingFolder() {
       logAuto_(next + ' 휴일 생략');
       return;
     }
-    if (!getRootFolderId_()) {
-      logAuto_('자료 폴더 없음');
-      return;
-    }
-    var folder = ensureDateFolder_(next);
+    var folder = folderMetaFromKey_(next);
     props_().setProperty('MEETING_DATE', folder.dateKey);
     props_().setProperty('MEETING_TIME', '10:00');
     props_().setProperty('MEETING_AUTO_DONE', today);
     logAuto_(folder.folderDate + ' 10:00');
+    try {
+      CacheService.getScriptCache().remove('pack:trigger');
+    } catch (ignorePackCache) {}
+    try {
+      syncPackTrigger_({ meetingDate: folder.dateKey, meetingTime: '10:00' });
+    } catch (ignorePack) {}
   } finally {
     lock.releaseLock();
   }

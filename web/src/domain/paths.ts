@@ -1,4 +1,5 @@
-import type { DriveNode } from '../api/types';
+import type { DateFolder, DriveNode } from '../api/types';
+import { dateKeyToFolderDate } from './folderDate';
 
 export function collectPdfs(node: DriveNode): DriveNode[] {
   const found: DriveNode[] = [];
@@ -8,6 +9,24 @@ export function collectPdfs(node: DriveNode): DriveNode[] {
   };
   walk(node);
   return found;
+}
+
+/** PDFs stored ahead of opening. Automatic preload is the meeting date only. */
+export function preloadPdfNodes(folders: DateFolder[], scope: 'all' | 'meeting', meetingDate?: string): DriveNode[] {
+  if (scope === 'meeting') {
+    if (!meetingDate) return [];
+    return folders.filter((item) => item.dateKey === meetingDate).flatMap((folder) => collectPdfs(folder));
+  }
+  const nodes = folders.flatMap((folder) => collectPdfs(folder));
+  const folderDate = meetingDate ? dateKeyToFolderDate(meetingDate) : null;
+  if (!folderDate) return nodes;
+  const first: DriveNode[] = [];
+  const rest: DriveNode[] = [];
+  for (const node of nodes) {
+    if (node.path === folderDate || node.path.startsWith(`${folderDate}/`)) first.push(node);
+    else rest.push(node);
+  }
+  return [...first, ...rest];
 }
 
 export function topFolderOf(path: string): string {

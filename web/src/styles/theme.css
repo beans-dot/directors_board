@@ -26,6 +26,9 @@
   --paper-2: #f7f8fa;
   --accent: #2f6fed;
   --accent-soft: #eef4ff;
+  --surface: #f3f5f8;
+  --card-line: #e7ebf2;
+  --shadow: 0 10px 28px rgba(22, 34, 51, 0.05);
   --nav: #e8eef8;
   --nav-line: #c5d4ee;
   --ok: #067647;

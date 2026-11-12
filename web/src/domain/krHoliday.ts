@@ -21,7 +21,15 @@ const LUNAR: Record<number, { seollal: string; buddha: string; chuseok: string }
 
 const WEEKEND_SUBSTITUTE = new Set(['national', 'buddha', 'labor', 'children', 'christmas']);
 const SUNDAY_SUBSTITUTE = new Set(['seollal', 'chuseok']);
-const OVERLAP_SUBSTITUTE = new Set(['national', 'seollal', 'buddha', 'labor', 'children', 'chuseok', 'christmas']);
+const OVERLAP_SUBSTITUTE = new Set([
+  'national',
+  'seollal',
+  'buddha',
+  'labor',
+  'children',
+  'chuseok',
+  'christmas',
+]);
 
 type HolidayKind =
   | 'national'
@@ -65,7 +73,8 @@ function onOrAfterWeekday(dateKey: string, weekday: number): string {
 /** 임기만료 선거일. 국회의원선거는 4년마다 5월 29일 50일 전 이후 첫 수요일, 지방선거는 4년마다 6월 첫 수요일. */
 export function scheduledElectionKeys(year: number): string[] {
   const keys: string[] = [];
-  if (year >= 2024 && (year - 2024) % 4 === 0) keys.push(onOrAfterWeekday(addDaysKey(`${year}-05-29`, -50), 3));
+  if (year >= 2024 && (year - 2024) % 4 === 0)
+    keys.push(onOrAfterWeekday(addDaysKey(`${year}-05-29`, -50), 3));
   if (year >= 2022 && (year - 2022) % 4 === 0) keys.push(onOrAfterWeekday(`${year}-06-01`, 3));
   return keys;
 }
@@ -127,7 +136,8 @@ function buildHolidays(year: number): Set<string> {
       const weekday = weekdayKey(key);
       const weekend = WEEKEND_SUBSTITUTE.has(kind) && (weekday === 0 || weekday === 6);
       const sunday = SUNDAY_SUBSTITUTE.has(kind) && weekday === 0;
-      const overlap = OVERLAP_SUBSTITUTE.has(kind) && weekday !== 0 && weekday !== 6 && unique.size > 1;
+      const overlap =
+        OVERLAP_SUBSTITUTE.has(kind) && weekday !== 0 && weekday !== 6 && unique.size > 1;
       if (weekend || sunday || overlap) count += 1;
     });
     if (!count) return;
@@ -180,11 +190,35 @@ export function nextAutoRunKey(now = new Date()): string {
   return addDaysKey(today, delta);
 }
 
-export function autoMeetingPlan(runMondayKey: string): { dateKey: string; time: '10:00' } | null {
+/**
+ * When the saved meeting day is already over, the next meeting is the same weekday
+ * on or after today. A holiday week is skipped.
+ */
+export function nextFixedMeetingDate(meetingDate: string, today: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(meetingDate) || !/^\d{4}-\d{2}-\d{2}$/.test(today)) return null;
+  if (meetingDate >= today) return null;
+  let cursor = meetingDate;
+  for (let step = 0; step < 60; step += 1) {
+    cursor = addDaysKey(cursor, 7);
+    if (Number(cursor.slice(0, 4)) > 2040) return null;
+    if (cursor >= today && !isKoreanHoliday(cursor)) return cursor;
+  }
+  return null;
+}
+
+export function autoMeetingPlan(
+  runMondayKey: string,
+  weekday = 1,
+  time = '10:00',
+): { dateKey: string; time: string } | null {
   if (weekdayKey(runMondayKey) !== 1) return null;
-  const next = addDaysKey(runMondayKey, 7);
+  if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) return null;
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return null;
+  let delta = (weekday - 1 + 7) % 7;
+  if (delta === 0) delta = 7;
+  const next = addDaysKey(runMondayKey, delta);
   const year = Number(next.slice(0, 4));
   if (year < 2026 || year > 2040) return null;
   if (isKoreanHoliday(next)) return null;
-  return { dateKey: next, time: '10:00' };
+  return { dateKey: next, time };
 }
