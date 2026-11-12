@@ -1,0 +1,10 @@
+#!/bin/bash
+# git pull 이 저장소를 갱신한 뒤에 실행된다. Git은 이 훅의 종료 코드로 merge를 되돌리지 않는다.
+set -u
+root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+if [[ -z "$root" ]]; then
+  printf '\n배포 실패: Git 저장소 루트를 찾지 못했습니다. 운영 화면과 API는 그대로입니다.\n' >&2
+  exit 1
+fi
+cd "$root"
+exec bash "$root/deploy/publish.sh" --hook

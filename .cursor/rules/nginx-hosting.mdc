@@ -7,9 +7,11 @@ alwaysApply: true
 
 운영 화면은 `https://depthm.yeonsung.ac.kr/` 이다. nginx가 `web/dist` 내용물을 제공한다. Firebase Hosting은 끄고 쓰지 않는다. `firebase deploy`를 실행하지 않는다.
 
-Git 커밋이나 푸시로는 화면이 바뀌지 않는다. 이 저장소는 푸시 시 자동 배포도 하지 않는다.
+Git 푸시만으로는 화면이 바뀌지 않는다. 이 저장소는 푸시 시 자동 배포도 하지 않는다.
 
-`web/`의 화면, 스타일, 공개 파일, 빌드에 굽는 환경 변수를 바꾼 작업은 `web`에서 `npm run build`로 `web/dist`를 만든다. 서버 접속 정보가 저장소에 없으면 그 내용을 nginx 문서 루트에 올려야 한다고 말하고, 배포된 것처럼 말하지 않는다. 서버 블록은 `deploy/nginx/depthm.conf`다.
+서버에서 최초 한 번 `sudo bash deploy/install-server-hook.sh`가 끝난 뒤에는, 그 서버의 `git pull`이 화면 빌드, nginx 문서 루트 반영, API 코드가 바뀐 경우의 재시작을 한다. 그 설치를 이 세션에서 확인하지 못했으면 운영 화면에 반영된 것처럼 말하지 않는다. 운영 SQLite와 회의자료는 배포가 지우거나 덮어쓰지 않는다.
+
+`web/`의 화면, 스타일, 공개 파일, 빌드에 굽는 환경 변수를 바꾼 작업은 서버의 `git pull`이 빌드한다. 로컬 확인이 필요하면 `web`에서 `npm run build`로 `web/dist`를 만든다. 서버 블록은 `deploy/nginx/depthm.conf`다.
 
 `gas/`만 바꾼 경우에는 화면 파일을 올리지 않는다. Apps Script는 배포 관리에서 새 버전으로 갱신해야 한다고 말한다.
 

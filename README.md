@@ -55,11 +55,26 @@ node --test materials.test.mjs api.test.mjs
 1. Node.js 24 이상이 있는 계정 `depthm`을 만들고, 이 저장소를 `/var/www/depthm-app`에 둡니다.
 2. `/var/www/depthm-data/materials`를 만들고 소유자를 `depthm`으로 합니다. 다른 사용자는 읽지 못하게 합니다.
 3. 관리자 비밀번호는 데이터베이스에 저장됩니다. 서버를 처음 열면 비밀번호는 `admin`이고, 로그인 후 바꿉니다.
-4. `cd web && npm install && npm run fetch-font && npm run build` 후 `web/dist` 내용물을 `/var/www/depthm`에 덮어씁니다.
-5. `cd server && npm install`
-6. `deploy/systemd/depthm-api.service`를 `/etc/systemd/system/`에 두고 `systemctl enable --now depthm-api`를 실행합니다.
-7. `deploy/nginx/depthm.conf`의 `/materials-api/` 프록시와 `X-Forwarded-Proto`를 반영한 뒤 `nginx -t`와 reload를 합니다. 자료 폴더를 `alias`로 열지 않습니다.
-8. `NODE_ENV=production`이면 자료 폴더를 쓸 수 없으면 프로세스가 시작하지 않습니다. 개발 폴더로 바꾸지 않습니다.
+4. `deploy/systemd/depthm-api.service`를 `/etc/systemd/system/`에 두고 `systemctl enable --now depthm-api`를 실행합니다. 자료 경로가 유닛에 적힌 대로인지 확인합니다.
+5. `deploy/nginx/depthm.conf`의 `/materials-api/` 프록시와 `X-Forwarded-Proto`를 반영한 뒤 `nginx -t`와 reload를 합니다. 자료 폴더를 `alias`로 열지 않습니다.
+6. 저장소를 받은 뒤 한 번 `sudo bash deploy/install-server-hook.sh`를 실행합니다. 이 스크립트가 실행 중인 nginx 문서 루트와 systemd 경로를 읽고, 화면을 빌드해 문서 루트에 반영한 다음 API를 다시 시작합니다.
+7. `NODE_ENV=production`이면 자료 폴더를 쓸 수 없으면 프로세스가 시작하지 않습니다. 개발 폴더로 바꾸지 않습니다.
+
+## git pull로 배포
+
+Git 훅은 저장소에 넣어도 서버에 자동으로 설치되지 않습니다. 서비스와 nginx가 이미 떠 있는 서버에서, 앱을 실행하는 계정으로 한 번만 설치합니다.
+
+```bash
+cd /var/www/depthm-app
+git pull
+sudo bash deploy/install-server-hook.sh
+```
+
+설치 스크립트는 `nginx -T`와 `systemctl cat`으로 문서 루트, 저장소, 회의자료, 데이터베이스 경로를 읽습니다. 그 경로가 서로 겹치거나 데이터베이스 파일이 없으면 설치를 멈춥니다. 자료 디렉터리의 소유권은 바꾸지 않습니다. API 재시작만 `sudo`로 허용하고, 그 명령은 `systemctl restart`와 `systemctl reset-failed`로 한정합니다.
+
+이후에는 그 계정으로 저장소에서 `git pull`만 하면 됩니다. `post-merge` 훅이 화면 변경이면 빌드가 끝난 뒤에만 문서 루트를 바꾸고, API 변경이면 코드를 불러온 뒤에만 서비스를 다시 시작합니다. 빌드나 재시작이 실패하면 이유를 출력하고 이전 화면과 이전 API로 되돌립니다. `git pull` 자체는 이미 끝난 병합을 취소하지 않으므로, 실패 문구를 확인합니다. 같은 커밋을 다시 배포할 때는 `bash deploy/publish.sh --install`을 실행합니다.
+
+`/var/www/depthm-data`의 SQLite와 회의자료, 메모는 이 배포가 복사하거나 지우지 않습니다. 푸시만으로는 운영 화면이 바뀌지 않습니다.
 
 서비스 확인:
 
