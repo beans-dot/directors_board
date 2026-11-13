@@ -4,12 +4,11 @@ import { showPdfVersionHistory } from '../../domain/changeNotice';
 import { marksToClear } from '../../domain/marks';
 import { findTextHits, type FindHit } from '../../domain/pdfFind';
 import { pdfVersionLabel } from '../../domain/pdfVersion';
-import { downloadServerFile } from '../../api/materials';
-import { clearFileMarks, closeOpenPdf, messageOf, openPdf, openStoredVersion } from '../../services/runtime';
+import { clearFileMarks, closeOpenPdf, downloadOpenFile, messageOf, openPdf, openStoredVersion } from '../../services/runtime';
 import { useApp } from '../../state/app';
 import { useMemoStore } from '../../state/memo';
 import { useTree } from '../../state/tree';
-import { useViewer } from '../../state/viewer';
+import { useViewer, type MemoTool } from '../../state/viewer';
 import { splitRatioFromDrag, useSplit } from '../../state/splitView';
 import { fitTargetBox, layoutFitMode, pageFitZoom, zoomForStoredFit, type PageFit } from './fitZoom';
 import { scrollFindHit, scrollToPdfPage, takePageFromObserver } from './pageScroll';
@@ -79,6 +78,11 @@ export function PdfViewer() {
     void openPdf(node);
   });
   const fitted = !doc || fit === 'custom' || fitDoc === doc;
+
+  const chooseTool = (next: MemoTool) => {
+    useViewer.getState().patch({ tool: next });
+    useApp.getState().patch({ memoOpen: next === 'pin' });
+  };
 
   const askClearMarks = () => {
     if (!file || readOnly) return;
@@ -323,22 +327,22 @@ export function PdfViewer() {
           )}
           {!splitOpen && <span className="tool-split" />}
           <div className="tool-group">
-            <ToolButton label="선택" on={tool === 'select'} onClick={() => useViewer.getState().patch({ tool: 'select' })}>
+            <ToolButton label="선택" on={tool === 'select'} onClick={() => chooseTool('select')}>
               <IconSelect />
             </ToolButton>
-            <ToolButton label="메모" on={tool === 'pin'} onClick={() => useViewer.getState().patch({ tool: 'pin' })}>
+            <ToolButton label="메모" on={tool === 'pin'} onClick={() => chooseTool('pin')}>
               <IconNote />
             </ToolButton>
-            <ToolButton label="형광펜" on={tool === 'highlight'} onClick={() => useViewer.getState().patch({ tool: 'highlight' })}>
+            <ToolButton label="형광펜" on={tool === 'highlight'} onClick={() => chooseTool('highlight')}>
               <IconHighlight />
             </ToolButton>
-            <ToolButton label="밑줄" on={tool === 'underline'} onClick={() => useViewer.getState().patch({ tool: 'underline' })}>
+            <ToolButton label="밑줄" on={tool === 'underline'} onClick={() => chooseTool('underline')}>
               <IconUnderline />
             </ToolButton>
-            <ToolButton label="손글씨" on={tool === 'ink'} onClick={() => useViewer.getState().patch({ tool: 'ink' })}>
+            <ToolButton label="손글씨" on={tool === 'ink'} onClick={() => chooseTool('ink')}>
               <IconPen />
             </ToolButton>
-            <ToolButton label="지우개" on={tool === 'erase'} onClick={() => useViewer.getState().patch({ tool: 'erase' })}>
+            <ToolButton label="지우개" on={tool === 'erase'} onClick={() => chooseTool('erase')}>
               <IconEraser />
             </ToolButton>
             <ToolButton
@@ -413,7 +417,7 @@ export function PdfViewer() {
               type="button"
               title="메모, 필기 등이 함께 다운로드 됩니다"
               onClick={() => {
-                void downloadServerFile(file.id, file.name).catch((error: unknown) => useApp.getState().toast(messageOf(error)));
+                void downloadOpenFile(file.id, file.name).catch((error: unknown) => useApp.getState().toast(messageOf(error)));
               }}
             >
               이 자료 내려받기

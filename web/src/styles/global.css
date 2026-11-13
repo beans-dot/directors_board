@@ -74,6 +74,8 @@ select:focus-visible {
   color: inherit;
   font: inherit;
   letter-spacing: inherit;
+  cursor: pointer;
+  text-decoration: none;
 }
 .brand-divider {
   width: 1px;
@@ -1065,17 +1067,19 @@ select:focus-visible {
 }
 .memo-editor {
   position: absolute;
-  z-index: 3;
-  width: 280px;
+  z-index: 4;
+  width: 300px;
   background: #fff;
-  border: 1px solid var(--line);
-  padding: 10px;
+  border: 1px solid rgba(22, 34, 51, 0.08);
+  border-radius: 16px;
+  padding: 12px;
+  box-shadow: 0 18px 40px rgba(22, 34, 51, 0.16);
 }
 .memo-editor-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   cursor: grab;
   touch-action: none;
   user-select: none;
@@ -1083,23 +1087,82 @@ select:focus-visible {
 .memo-editor-head.dragging {
   cursor: grabbing;
 }
-.memo-editor-head button {
+.memo-editor-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+.memo-editor-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+}
+.memo-editor-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.memo-editor-delete {
+  width: 28px;
+  height: 28px;
   border: 0;
+  border-radius: 999px;
   background: transparent;
+  color: var(--danger);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.memo-editor-delete:hover {
+  background: var(--danger-bg);
+}
+.memo-editor-close {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
   font-size: 18px;
   line-height: 1;
-  padding: 0 4px;
-  cursor: pointer;
+  padding: 0;
+}
+.memo-editor-close:hover {
+  background: #f2f5f9;
+  color: var(--ink);
 }
 .memo-editor textarea {
   width: 100%;
-  min-height: 140px;
-  border: 1px solid var(--line);
-  padding: 8px;
+  min-height: 132px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: #f4f7fb;
+  padding: 10px 12px;
   resize: vertical;
+  line-height: 1.55;
+  color: var(--ink);
+}
+.memo-editor textarea:focus {
+  outline: none;
+  background: #fff;
+  border-color: #d5e2fb;
+  box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.14);
 }
 .memo-editor .help {
-  margin: 8px 0 0;
+  margin: 8px 2px 0;
+  color: var(--muted);
+  font-size: 12px;
 }
 .viewer-column {
   flex: 1;

@@ -166,6 +166,9 @@ describe('account memos and downloads', () => {
       };
       const put = await json(port, 'PUT', '/memos', { annotation: memo }, cookieA2);
       assert.equal(put.status, 200, JSON.stringify(put.payload));
+      const edited = await json(port, 'PUT', '/memos', { annotation: { ...memo, content: '수정한 메모', version: 2 } }, cookieA2);
+      assert.equal(edited.status, 200, JSON.stringify(edited.payload));
+      assert.equal(edited.payload.data.annotation.content, '수정한 메모');
       const clash = await json(port, 'PUT', '/memos', { annotation: { ...memo, content: '다른 내용', version: 1 } }, cookieA2);
       assert.equal(clash.status, 409);
 
@@ -197,7 +200,7 @@ describe('account memos and downloads', () => {
       const tree = await json(port2, 'GET', '/tree', null, cookieA);
       const file = tree.payload.data.folders[0].children.find((child) => child.name === '본문').children[0];
       const memos = await json(port2, 'GET', `/memos?fileId=${file.id}`, null, cookieA);
-      assert.equal(memos.payload.data.annotations[0].content, '예산안 확인');
+      assert.equal(memos.payload.data.annotations[0].content, '수정한 메모');
       assert.equal(memos.payload.data.annotations[0].x, 0.2);
 
       const download = await fetch(`http://127.0.0.1:${port2}/download/file?id=${file.id}`, { headers: { Cookie: cookieA } });
@@ -208,7 +211,7 @@ describe('account memos and downloads', () => {
       const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
       const doc = await pdfjs.getDocument({ data: pdfBytes, isEvalSupported: false, useSystemFonts: false }).promise;
       const text = (await (await doc.getPage(1)).getTextContent()).items.map((item) => item.str).join('');
-      assert.match(text, /예산안 확인/);
+      assert.match(text, /수정한 메모/);
       const original = fs.readFileSync(path.join(root, '26.11.12.', '본문', '1_예산안.pdf'));
       assert.equal(original.subarray(0, 5).toString(), '%PDF-');
       assert.notEqual(Buffer.from(pdfBytes).equals(original), true);
@@ -255,7 +258,7 @@ describe('account memos and downloads', () => {
       const home = await json(port2, 'GET', '/admin/home', null, adminCookie);
       assert.equal(home.payload.data.settings.meetingDate, '');
       const keptMemo = await json(port2, 'GET', `/memos?fileId=${file.id}`, null, cookieA);
-      assert.equal(keptMemo.payload.data.annotations[0].content, '예산안 확인');
+      assert.equal(keptMemo.payload.data.annotations[0].content, '수정한 메모');
 
       const reset = await json(port2, 'POST', '/admin/officers/user_aaaa1111/reset-password', {}, adminCookie);
       assert.equal(reset.status, 200);

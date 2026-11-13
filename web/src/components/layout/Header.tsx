@@ -2,18 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { accountLabel } from '../../domain/account';
 import { logoutAdmin, messageOf, requestConnectedRefresh } from '../../services/runtime';
 import { useApp } from '../../state/app';
-import { scrollToPdfPage } from '../viewer/pageScroll';
-import { useViewer } from '../../state/viewer';
 import { UsageTipBar } from './UsageTipBar';
 
-function goFirstPage() {
-  useApp.getState().patch({ screen: 'main' });
-  const viewer = useViewer.getState();
-  if (viewer.doc && viewer.page !== 1) viewer.patch({ page: 1 });
-  const scroll = () => scrollToPdfPage(1);
-  scroll();
-  window.setTimeout(scroll, 0);
-}
+const UNIVERSITY_HOME = 'https://yeonsung.ac.kr/ko/index.do';
 
 function reloadApp() {
   window.location.reload();
@@ -93,9 +84,9 @@ export function Header() {
   return (
     <header className="header">
       <div className="brand">
-        <button className="brand-home" type="button" aria-label="첫 페이지로 이동" onClick={goFirstPage}>
+        <a className="brand-home" href={UNIVERSITY_HOME} aria-label="연성대학교 홈페이지로 이동">
           {logoFailed ? <strong>연성대학교</strong> : <img src="/assets/logo.png" alt="" onError={() => setLogoFailed(true)} />}
-        </button>
+        </a>
         <span className="brand-divider" />
         <h1>
           <button

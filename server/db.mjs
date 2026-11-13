@@ -390,6 +390,21 @@ export class Store {
         `UPDATE memos SET page=@page, x=@x, y=@y, w=@w, h=@h, type=@type, content=@content, ink_json=@ink_json, color=@color, status=@status, version=@version, updated_at=@updated_at
          WHERE id=@id AND user_id=@user_id`,
       )
-      .run(row);
+      .run({
+        page: row.page,
+        x: row.x,
+        y: row.y,
+        w: row.w,
+        h: row.h,
+        type: row.type,
+        content: row.content,
+        ink_json: row.ink_json,
+        color: row.color,
+        status: row.status,
+        version: row.version,
+        updated_at: row.updated_at,
+        id: row.id,
+        user_id: row.user_id,
+      });
   }
 }

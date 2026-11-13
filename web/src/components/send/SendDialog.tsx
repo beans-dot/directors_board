@@ -3,7 +3,7 @@ import type { DateFolder } from '../../api/types';
 import { meetingZipName, todayFolderDate } from '../../domain/folderDate';
 import { collectPdfs, pickSendFolder } from '../../domain/paths';
 import { downloadMeetingZip } from '../../api/materials';
-import { messageOf } from '../../services/runtime';
+import { messageOf, syncMemosBeforeDownload } from '../../services/runtime';
 import { useApp } from '../../state/app';
 import { useTree } from '../../state/tree';
 import { useViewer } from '../../state/viewer';
@@ -57,8 +57,12 @@ export function SendDialog() {
   const download = (target: DateFolder) => {
     setError('');
     setStep('work');
-    setProgress('서버에서 메모를 입히는 중');
-    void downloadMeetingZip(target.id, meetingZipName(target.dateKey, target.folderDate))
+    setProgress('메모를 저장하는 중');
+    void syncMemosBeforeDownload()
+      .then(() => {
+        setProgress('서버에서 메모를 입히는 중');
+        return downloadMeetingZip(target.id, meetingZipName(target.dateKey, target.folderDate));
+      })
       .then(() => {
         useApp.getState().toast('회의자료를 내려받았습니다.');
         close();

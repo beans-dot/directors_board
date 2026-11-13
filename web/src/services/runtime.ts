@@ -5,6 +5,7 @@ import {
   changePassword,
   fetchRoster,
   fetchSession,
+  downloadServerFile,
   listServerMemos,
   loginAdminAccount,
   loginOfficer,
@@ -59,6 +60,37 @@ const pdfDownloadQueue = createDownloadQueue();
 
 const memoTimers = new Map<string, number>();
 let conflictLocal: Annotation | null = null;
+let openMemoDraft: { id: string; text: string; ann: Annotation } | null = null;
+let committingMemo: Promise<void> | null = null;
+
+export function setOpenMemoDraft(draft: { id: string; text: string; ann: Annotation } | null): void {
+  openMemoDraft = draft;
+}
+
+/** 편집 중인 글이 저장 대기이면 지금 기기에 남긴다. */
+export function commitOpenMemo(): Promise<void> {
+  if (committingMemo) return committingMemo;
+  const draft = openMemoDraft;
+  if (!draft || draft.text === draft.ann.content) return Promise.resolve();
+  const next: Annotation = {
+    ...draft.ann,
+    content: draft.text,
+    version: draft.ann.version + 1,
+    updatedAt: new Date().toISOString(),
+  };
+  if (openMemoDraft?.id === draft.id && openMemoDraft.text === draft.text) {
+    openMemoDraft = { id: draft.id, text: draft.text, ann: next };
+  }
+  committingMemo = saveMemo(next, 'update')
+    .catch((error: unknown) => {
+      if (openMemoDraft?.id === draft.id && openMemoDraft.ann === next) openMemoDraft = draft;
+      throw error;
+    })
+    .finally(() => {
+      committingMemo = null;
+    });
+  return committingMemo;
+}
 
 function queueMemoSync(ann: Annotation): void {
   const prev = memoTimers.get(ann.id);
@@ -84,27 +116,59 @@ async function forgetPending(id: string): Promise<void> {
   await kvSet('pendingMemos', pending);
 }
 
-async function pushMemo(id: string): Promise<void> {
+async function pushMemo(id: string, force = false, quiet = false): Promise<'ok' | 'conflict' | 'missing' | 'error'> {
   const ann = (await listAllAnnotations()).find((item) => item.id === id);
-  if (!ann) return;
+  if (!ann) return 'missing';
   useApp.getState().patch({ memoSyncText: '메모를 저장하는 중' });
   try {
-    const saved = await putServerMemo(ann);
+    const saved = await putServerMemo(ann, force);
     if (saved.version !== ann.version) await writeAnnotation(saved, 'update');
     await forgetPending(id);
     if (conflictLocal?.id === id) conflictLocal = null;
     useApp.getState().patch({ memoSyncText: '' });
+    return 'ok';
   } catch (error) {
     if (error instanceof MemoConflictError) {
-      conflictLocal = ann;
-      useApp.getState().patch({ memoSyncText: '다른 화면의 메모와 겹쳐 저장하지 못했습니다. 이 기기의 내용은 남아 있습니다.' });
-      return;
+      if (!quiet) {
+        conflictLocal = ann;
+        useApp.getState().patch({ memoSyncText: '다른 화면의 메모와 겹쳐 저장하지 못했습니다. 이 기기의 내용은 남아 있습니다.' });
+      }
+      return 'conflict';
     }
     await rememberPending(ann);
     useApp.getState().patch({
       memoSyncText: error instanceof Error ? error.message : '메모가 서버에 저장되지 않았습니다. 이 기기에 남아 있습니다.',
     });
+    return 'error';
   }
+}
+
+function clearMemoTimer(id: string): void {
+  const timer = memoTimers.get(id);
+  if (!timer) return;
+  window.clearTimeout(timer);
+  memoTimers.delete(id);
+}
+
+/** 화면에 있는 메모 글을 서버에 올린 뒤 PDF를 굽게 한다. 겹친 저장은 이 화면 글로 덮는다. */
+export async function syncMemosBeforeDownload(fileId?: string): Promise<void> {
+  await commitOpenMemo();
+  const anns = (await listAllAnnotations()).filter((ann) => !fileId || ann.driveFileId === fileId);
+  for (const ann of anns) {
+    clearMemoTimer(ann.id);
+    const pushed = await pushMemo(ann.id, false, true);
+    if (pushed === 'conflict') {
+      const forced = await pushMemo(ann.id, true, true);
+      if (forced !== 'ok') throw new Error('메모를 저장하지 못해 자료를 내려받지 못했습니다.');
+      continue;
+    }
+    if (pushed === 'error') throw new Error('메모를 저장하지 못해 자료를 내려받지 못했습니다.');
+  }
+}
+
+export async function downloadOpenFile(fileId: string, fallbackName: string): Promise<void> {
+  await syncMemosBeforeDownload(fileId);
+  await downloadServerFile(fileId, fallbackName);
 }
 
 export async function flushPendingMemos(): Promise<void> {
