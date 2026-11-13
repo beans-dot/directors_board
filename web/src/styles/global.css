@@ -434,6 +434,16 @@ select:focus-visible {
   margin: 10px 0 0;
   line-height: 1.55;
 }
+.login-notice {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f4f7fb;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.5;
+}
 .login-list {
   display: flex;
   flex-direction: column;

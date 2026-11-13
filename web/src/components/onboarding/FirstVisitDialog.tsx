@@ -46,7 +46,8 @@ export function FirstVisitDialog() {
           )}
           <h1 id="login-title">보직을 선택해 주세요</h1>
         </div>
-        <p className="help">직위를 고른 뒤 비밀번호를 입력합니다. 처음에는 사번입니다.</p>
+        <p className="help">직위를 고른 뒤 비밀번호를 입력합니다.</p>
+        <p className="login-notice">초기 비밀번호는 사번입니다.</p>
         {!online && <p className="help">인터넷에 연결된 뒤 다시 열어 주세요.</p>}
         {online && !config && <p className="help">{statusText || '보직 목록을 불러오는 중'}</p>}
         {online && config && officers === null && (
