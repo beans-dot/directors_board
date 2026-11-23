@@ -1080,7 +1080,9 @@ async function handle(req, res, root, store) {
     if (req.method === 'PUT' && pathname === '/admin/tips') {
       requireAdmin(store, req);
       const body = JSON.parse((await readBody(req, 20_000)).toString('utf8') || '{}');
-      const tips = Array.isArray(body.usageTips) ? body.usageTips.map((tip) => String(tip).slice(0, 80)).slice(0, 12) : [];
+      const tips = Array.isArray(body.usageTips)
+        ? body.usageTips.slice(0, 20).map((tip) => [...String(tip).replace(/[\r\n]+/g, '').trim()].slice(0, 160).join('')).filter(Boolean)
+        : [];
       store.putSetting('usageTips', JSON.stringify(tips));
       sendJson(res, 200, { ok: true, data: { usageTips: tips } });
       return;

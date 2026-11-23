@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  USAGE_TIP_INTERVAL_MS,
+  USAGE_TIP_HEIGHT_PX,
   USAGE_TIP_LINE_PX,
   USAGE_TIP_SLIDE_MS,
   usageTipCharLimit,
+  usageTipIntervalMs,
 } from '../../domain/usageTip';
 import { useApp } from '../../state/app';
 
@@ -24,6 +25,9 @@ export function UsageTipBar() {
   const [visible, setVisible] = useState(0);
   const [slide, setSlide] = useState<Slide | null>(null);
   const [epoch, setEpoch] = useState(0);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const paused = hovered || focused;
   const windowRef = useRef<HTMLDivElement>(null);
   const probeRef = useRef<HTMLSpanElement>(null);
   const visibleRef = useRef(0);
@@ -58,10 +62,10 @@ export function UsageTipBar() {
   }, [tipKey]);
 
   useEffect(() => {
-    if (tips.length < 2) return;
-    const timer = window.setInterval(() => beginRef.current(1), USAGE_TIP_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [tipKey, tips.length, epoch]);
+    if (tips.length < 2 || paused) return;
+    const timer = window.setTimeout(() => beginRef.current(1), usageTipIntervalMs(tips[visible] ?? ''));
+    return () => window.clearTimeout(timer);
+  }, [tipKey, tips, visible, epoch, paused]);
 
   useEffect(() => {
     if (!slide || slide.phase === 'run') return;
@@ -123,7 +127,16 @@ export function UsageTipBar() {
   const canMove = tips.length > 1 && !slide;
 
   return (
-    <div className="usage-tip">
+    <div
+      className="usage-tip"
+      title={current}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocusCapture={() => setFocused(true)}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
+      }}
+    >
       <span className="usage-tip-label">사용 Tip</span>
       <div className="usage-tip-window" ref={windowRef}>
         <span ref={probeRef} className="usage-tip-probe" aria-hidden="true">
@@ -134,7 +147,7 @@ export function UsageTipBar() {
             className="usage-tip-track"
             aria-hidden="true"
             style={{
-              transform: `translateY(-${shift * USAGE_TIP_LINE_PX}px)`,
+              transform: `translateY(-${shift * USAGE_TIP_HEIGHT_PX}px)`,
               transition: slide && slide.phase !== 'prep' ? `transform ${USAGE_TIP_SLIDE_MS}ms ease` : 'none',
             }}
             onTransitionEnd={(event) => {
@@ -144,8 +157,8 @@ export function UsageTipBar() {
             }}
           >
             {rows.map((tip, item) => (
-              <div className="usage-tip-line" key={`${item}-${tip}`} style={{ height: USAGE_TIP_LINE_PX, lineHeight: `${USAGE_TIP_LINE_PX}px` }}>
-                {tip}
+              <div className="usage-tip-line" key={`${item}-${tip}`} style={{ height: USAGE_TIP_HEIGHT_PX, lineHeight: `${USAGE_TIP_LINE_PX}px` }}>
+                <span className="usage-tip-text">{tip}</span>
               </div>
             ))}
           </div>

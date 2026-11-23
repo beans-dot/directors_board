@@ -35,6 +35,7 @@ describe('material change notices', () => {
     fireEvent.click(button);
     expect(setMaterialChangeNotice).toHaveBeenCalledWith('f1', true);
     await waitFor(() => expect(button.getAttribute('aria-pressed')).toBe('true'));
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
     expect(useTree.getState().changeNotices).toEqual([notice]);
     vi.mocked(setMaterialChangeNotice).mockResolvedValue([]);
     fireEvent.click(button);

@@ -5,7 +5,7 @@ import type { Profile } from '../api/types';
 import { UsageTipTab } from '../components/admin/UsageTipTab';
 import { Header } from '../components/layout/Header';
 import { formatKoreanDate } from '../domain/folderDate';
-import { clampUsageTip, usageTipCharLimit, usageTipRows } from '../domain/usageTip';
+import { clampUsageTip, usageTipCharLimit, usageTipIntervalMs, usageTipRows } from '../domain/usageTip';
 import { useAdmin } from '../state/admin';
 import { useApp } from '../state/app';
 
@@ -25,9 +25,12 @@ const adminProfile: Profile = {
 
 describe('usage tip limit', () => {
   it('counts characters that fit in the bar', () => {
-    expect(usageTipCharLimit(140, 14)).toBe(10);
+    expect(usageTipCharLimit(140, 14)).toBe(20);
     expect(usageTipCharLimit(7, 14)).toBeNull();
-    expect(usageTipCharLimit(5000, 14)).toBe(100);
+    expect(usageTipCharLimit(5000, 14)).toBe(160);
+    expect(usageTipIntervalMs('짧은 안내')).toBe(6000);
+    expect(usageTipIntervalMs('가'.repeat(80))).toBe(10000);
+    expect(usageTipIntervalMs('가'.repeat(200))).toBe(20000);
     expect(clampUsageTip('가나다라', 3)).toBe('가나다');
     expect(clampUsageTip('가\n나', 4)).toBe('가나');
     expect(usageTipRows(['가나다라'], 2)).toEqual(['가나']);
@@ -57,7 +60,7 @@ describe('usage tip bar', () => {
   });
 
   it('slides to the next tip after 6 seconds', () => {
-    vi.useFakeTimers({ toFake: ['setInterval', 'setTimeout'] });
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
     try {
       render(<Header />);
       const track = document.querySelector('.usage-tip-track') as HTMLElement;
@@ -76,14 +79,14 @@ describe('usage tip bar', () => {
       act(() => {
         vi.advanceTimersByTime(20);
       });
-      expect(track.style.transform).toBe('translateY(-22px)');
+      expect(track.style.transform).toBe('translateY(-44px)');
     } finally {
       vi.useRealTimers();
     }
   });
 
   it('moves to the previous and next tip from the arrows', () => {
-    vi.useFakeTimers({ toFake: ['setInterval', 'setTimeout'] });
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
     try {
       render(<Header />);
       fireEvent.click(screen.getByRole('button', { name: '다음 사용 Tip' }));
@@ -106,6 +109,32 @@ describe('usage tip bar', () => {
         vi.advanceTimersByTime(20);
       });
       expect((document.querySelector('.usage-tip-track') as HTMLElement).style.transform).toBe('translateY(-0px)');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('allows longer reading time and pauses while hovered or focused', () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
+    try {
+      const long = '가'.repeat(80);
+      useApp.setState({ config: { ...useApp.getState().config!, usageTips: [long, '다음 안내'] } });
+      render(<Header />);
+      const bar = document.querySelector('.usage-tip') as HTMLElement;
+      act(() => { vi.advanceTimersByTime(6000); });
+      expect(document.querySelector('.usage-tip-live')?.textContent).toBe(long);
+      fireEvent.mouseOver(bar);
+      act(() => { vi.advanceTimersByTime(15000); });
+      expect(document.querySelector('.usage-tip-live')?.textContent).toBe(long);
+      const next = screen.getByRole('button', { name: '다음 사용 Tip' });
+      fireEvent.focus(next);
+      fireEvent.mouseOut(bar);
+      act(() => { vi.advanceTimersByTime(15000); });
+      expect(document.querySelector('.usage-tip-live')?.textContent).toBe(long);
+      fireEvent.blur(next, { relatedTarget: document.body });
+      act(() => { vi.advanceTimersByTime(10000); });
+      expect(document.querySelector('.usage-tip-live')?.textContent).toBe('다음 안내');
+      expect(bar.title).toBe('다음 안내');
     } finally {
       vi.useRealTimers();
     }
@@ -141,19 +170,35 @@ describe('usage tip editor', () => {
     });
   });
 
-  it('keeps each tip inside the bar and saves added tips', async () => {
-    vi.mocked(saveUsageTips).mockResolvedValue(['가나다라마바사아', '둘째 안내']);
+  it('saves up to 160 characters even when the header is narrower', async () => {
+    const long = '가'.repeat(160);
+    vi.mocked(saveUsageTips).mockResolvedValue([long, '둘째 안내']);
     render(<UsageTipTab />);
-    expect(screen.getByText('8자 이내로 입력')).toBeTruthy();
-    const first = screen.getByLabelText('사용 Tip 1') as HTMLInputElement;
+    expect(screen.getByText(/160자 이내로 입력/)).toBeTruthy();
+    const first = screen.getByLabelText('사용 Tip 1') as HTMLTextAreaElement;
     expect(first.value).toBe('기존 안내');
-    expect(first.maxLength).toBe(8);
-    fireEvent.change(first, { target: { value: '가나다라마바사아자' } });
-    expect(first.value).toBe('가나다라마바사아');
+    expect(first.maxLength).toBe(160);
+    fireEvent.change(first, { target: { value: `${long}나` } });
+    expect(first.value).toBe(long);
+    act(() => useApp.setState({ usageTipLimit: 4, usageTipWidth: 56 }));
+    expect(first.value).toBe(long);
+    expect(screen.getByText('160/160')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '사용 Tip 추가' }));
     fireEvent.change(screen.getByLabelText('사용 Tip 2'), { target: { value: '둘째 안내' } });
     fireEvent.click(screen.getByRole('button', { name: '사용 Tip 저장' }));
-    await waitFor(() => expect(useApp.getState().config?.usageTips).toEqual(['가나다라마바사아', '둘째 안내']));
-    expect(saveUsageTips).toHaveBeenCalledWith(['가나다라마바사아', '둘째 안내']);
+    await waitFor(() => expect(useApp.getState().config?.usageTips).toEqual([long, '둘째 안내']));
+    expect(saveUsageTips).toHaveBeenCalledWith([long, '둘째 안내']);
+  });
+
+  it('keeps saved text intact before measuring or after shrinking the header', () => {
+    const long = '기존 안내 문장입니다. '.repeat(6);
+    useAdmin.setState({ settings: { ...useAdmin.getState().settings!, usageTips: [long] } });
+    useApp.setState({ usageTipLimit: 0 });
+    render(<UsageTipTab />);
+    const input = screen.getByLabelText('사용 Tip 1') as HTMLTextAreaElement;
+    expect(input.value).toBe(long.trim());
+    expect(input.disabled).toBe(false);
+    act(() => useApp.setState({ usageTipLimit: 5 }));
+    expect(input.value).toBe(long.trim());
   });
 });

@@ -122,3 +122,21 @@ it('preserves pre-upgrade file order when old databases do not record manual sor
     await new Promise((resolve) => app.server.close(resolve));
   }
 });
+
+it('stores 160-character usage tips without cutting Unicode characters or saved text at 80 characters', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'depthm-tips-'));
+  const app = await start(root);
+  try {
+    const long = `${'가'.repeat(159)}😀`;
+    const tips = [long, `${long}끝`, '줄\n바꿈\r\n제거'];
+    const saved = await app.request('PUT', '/admin/tips', { usageTips: tips });
+    assert.equal(saved.status, 200);
+    assert.deepEqual(saved.data.usageTips, [long, long, '줄바꿈제거']);
+    assert.deepEqual((await app.request('GET', '/admin/home')).data.settings.usageTips, saved.data.usageTips);
+    assert.deepEqual((await app.request('GET', '/boot')).data.config.usageTips, saved.data.usageTips);
+    const many = await app.request('PUT', '/admin/tips', { usageTips: Array.from({ length: 21 }, (_, index) => `팁 ${index + 1}`) });
+    assert.equal(many.data.usageTips.length, 20);
+  } finally {
+    await new Promise((resolve) => app.server.close(resolve));
+  }
+});
