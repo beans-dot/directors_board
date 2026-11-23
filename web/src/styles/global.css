@@ -95,7 +95,7 @@ select:focus-visible {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 54px;
+  height: 36px;
   padding: 0 8px 0 12px;
   border: 1px solid var(--card-line);
   border-radius: 10px;
@@ -146,7 +146,7 @@ select:focus-visible {
   position: relative;
   flex: 1;
   min-width: 0;
-  height: 44px;
+  height: 22px;
   overflow: hidden;
 }
 .usage-tip-probe {
@@ -160,7 +160,7 @@ select:focus-visible {
   pointer-events: none;
 }
 .usage-tip-line {
-  height: 44px;
+  height: 22px;
   line-height: 22px;
   font-size: 14px;
   font-weight: 400;
@@ -170,13 +170,9 @@ select:focus-visible {
   text-align: left;
 }
 .usage-tip-text {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  white-space: normal;
-  word-break: normal;
-  overflow-wrap: anywhere;
+  display: block;
+  min-width: 0;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -192,26 +188,36 @@ select:focus-visible {
   border: 0;
 }
 @media (max-width: 1100px) {
-  :root {
-    --header-h: 112px;
-  }
   .header {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: 28px 26px;
     grid-template-areas: 'brand account' 'tips tips';
-    row-gap: 6px;
-    padding-top: 6px;
-    padding-bottom: 6px;
+    align-content: center;
+    row-gap: 2px;
   }
   .header .brand {
     grid-area: brand;
     min-width: 0;
+  }
+  .header .brand img {
+    height: 24px;
+  }
+  .header .brand h1 {
+    font-size: 16px;
   }
   .header .header-meta {
     grid-area: account;
   }
   .header .usage-tip-slot {
     grid-area: tips;
+  }
+  .header .usage-tip {
+    height: 26px;
+    border-radius: 8px;
+  }
+  .header .usage-tip-nav {
+    height: 20px;
   }
 }
 .header-meta {
@@ -1910,7 +1916,7 @@ table.data th {
 }
 .usage-tip-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   max-width: 100%;
 }
@@ -1922,13 +1928,14 @@ table.data th {
   font-size: 14px;
   font-weight: 500;
   line-height: 1.6;
-  resize: vertical;
 }
 .usage-tip-count {
   flex: none;
-  padding-top: 8px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+.usage-tip-overflow {
+  color: var(--danger);
 }
 .usage-tip-actions {
   display: flex;

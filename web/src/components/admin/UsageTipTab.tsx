@@ -13,6 +13,8 @@ export function UsageTipTab() {
   const [rows, setRows] = useState<string[]>(['']);
   const [saving, setSaving] = useState(false);
   const source = useRef<string[] | null>(null);
+  const measured = limit > 0;
+  const overLimit = measured && rows.some((tip) => [...tip].length > limit);
 
   useEffect(() => {
     if (!settings || source.current) return;
@@ -22,7 +24,7 @@ export function UsageTipTab() {
   }, [settings]);
 
   const change = (index: number, value: string) => {
-    setRows((current) => current.map((tip, item) => (item === index ? clampUsageTip(value, USAGE_TIP_MAX_CHARS) : tip)));
+    setRows((current) => current.map((tip, item) => (item === index ? clampUsageTip(value, limit) : tip)));
   };
 
   const add = () => {
@@ -39,8 +41,8 @@ export function UsageTipTab() {
 
   const save = () => {
     const profile = useApp.getState().profile;
-    if (profile?.role !== 'admin' || !settings || saving) return;
-    const tips = rows.map((tip) => clampUsageTip(tip, USAGE_TIP_MAX_CHARS).trim()).filter(Boolean);
+    if (profile?.role !== 'admin' || !settings || !measured || overLimit || saving) return;
+    const tips = rows.map((tip) => clampUsageTip(tip, limit).trim()).filter(Boolean);
     setSaving(true);
     void saveUsageTips(tips)
       .then((usageTips) => {
@@ -57,31 +59,30 @@ export function UsageTipTab() {
       .finally(() => setSaving(false));
   };
 
-  const fieldWidth = Math.max(420, width + 22);
+  const fieldWidth = Math.max(140, width + 22);
 
   return (
     <section className="usage-tip-editor">
       <h2>사용 Tip</h2>
-      <p className="help">헤더에 두 줄까지 표시하며, 문장 길이에 따라 6~20초 동안 보여 줍니다. 마우스를 올리거나 화살표에 초점을 두면 자동 넘김이 멈춥니다. 화살표로 이전·다음 팁을 볼 수 있습니다.</p>
+      <p className="help">사용 Tip은 한 줄로 표시합니다. 현재 Tip 박스의 너비에 들어가는 길이까지만 입력할 수 있습니다. 마우스를 올리면 자동 넘김이 멈추고 전체 문구를 확인할 수 있습니다.</p>
       <p id="usage-tip-limit" className="help">
-        {`${USAGE_TIP_MAX_CHARS}자 이내로 입력`}
-        {limit > 0 && ` · 현재 화면에서 두 줄에 읽기 편한 길이는 약 ${limit}자입니다.`}
+        {measured ? `현재 Tip 박스 한 줄 기준 ${limit}자 이내로 입력` : '사용 Tip 칸 너비를 확인하는 중입니다.'}
       </p>
+      {overLimit && <p className="help usage-tip-overflow" role="alert">한 줄 한도를 넘는 문구가 있습니다. 문구를 줄인 뒤 저장해 주세요.</p>}
       <div className="usage-tip-rows">
         {rows.map((tip, index) => (
           <div className="usage-tip-row" key={index}>
-            <textarea
+            <input
               className="usage-tip-input"
               style={{ width: fieldWidth, maxWidth: '100%' }}
               aria-label={`사용 Tip ${index + 1}`}
               aria-describedby="usage-tip-limit"
               value={tip}
-              maxLength={USAGE_TIP_MAX_CHARS}
-              rows={2}
-              disabled={!settings || saving}
+              maxLength={measured ? limit : 0}
+              disabled={!settings || !measured || saving}
               onChange={(event) => change(index, event.target.value)}
             />
-            <small className="usage-tip-count">{[...tip].length}/{USAGE_TIP_MAX_CHARS}</small>
+            <small className={`usage-tip-count${measured && [...tip].length > limit ? ' usage-tip-overflow' : ''}`}>{[...tip].length}/{measured ? limit : '–'}</small>
             <button className="btn btn-line btn-sm" type="button" disabled={saving} onClick={() => remove(index)}>
               삭제
             </button>
@@ -93,12 +94,12 @@ export function UsageTipTab() {
           className="btn btn-line btn-sm usage-tip-add"
           type="button"
           aria-label="사용 Tip 추가"
-          disabled={!settings || saving || rows.length >= USAGE_TIP_MAX_COUNT}
+          disabled={!settings || !measured || saving || rows.length >= USAGE_TIP_MAX_COUNT}
           onClick={add}
         >
           +
         </button>
-        <Button variant="primary" type="button" disabled={!settings || saving} onClick={save}>
+        <Button variant="primary" type="button" disabled={!settings || !measured || overLimit || saving} onClick={save}>
           사용 Tip 저장
         </Button>
       </div>

@@ -25,8 +25,10 @@ const adminProfile: Profile = {
 
 describe('usage tip limit', () => {
   it('counts characters that fit in the bar', () => {
-    expect(usageTipCharLimit(140, 14)).toBe(20);
-    expect(usageTipCharLimit(7, 14)).toBeNull();
+    expect(usageTipCharLimit(140, 14)).toBe(10);
+    expect(usageTipCharLimit(7, 14)).toBe(0);
+    expect(usageTipCharLimit(13, 14)).toBe(0);
+    expect(usageTipCharLimit(140, 0)).toBeNull();
     expect(usageTipCharLimit(5000, 14)).toBe(160);
     expect(usageTipIntervalMs('짧은 안내')).toBe(6000);
     expect(usageTipIntervalMs('가'.repeat(80))).toBe(10000);
@@ -79,7 +81,7 @@ describe('usage tip bar', () => {
       act(() => {
         vi.advanceTimersByTime(20);
       });
-      expect(track.style.transform).toBe('translateY(-44px)');
+      expect(track.style.transform).toBe('translateY(-22px)');
     } finally {
       vi.useRealTimers();
     }
@@ -170,24 +172,22 @@ describe('usage tip editor', () => {
     });
   });
 
-  it('saves up to 160 characters even when the header is narrower', async () => {
-    const long = '가'.repeat(160);
-    vi.mocked(saveUsageTips).mockResolvedValue([long, '둘째 안내']);
+  it('limits and saves each tip to the measured single-line width', async () => {
+    vi.mocked(saveUsageTips).mockResolvedValue(['가나다라마바사아', '둘째 안내']);
     render(<UsageTipTab />);
-    expect(screen.getByText(/160자 이내로 입력/)).toBeTruthy();
-    const first = screen.getByLabelText('사용 Tip 1') as HTMLTextAreaElement;
+    expect(screen.getByText('현재 Tip 박스 한 줄 기준 8자 이내로 입력')).toBeTruthy();
+    const first = screen.getByLabelText('사용 Tip 1') as HTMLInputElement;
     expect(first.value).toBe('기존 안내');
-    expect(first.maxLength).toBe(160);
-    fireEvent.change(first, { target: { value: `${long}나` } });
-    expect(first.value).toBe(long);
-    act(() => useApp.setState({ usageTipLimit: 4, usageTipWidth: 56 }));
-    expect(first.value).toBe(long);
-    expect(screen.getByText('160/160')).toBeTruthy();
+    expect(first.maxLength).toBe(8);
+    expect(first.tagName).toBe('INPUT');
+    fireEvent.change(first, { target: { value: '가나다라마바사아자' } });
+    expect(first.value).toBe('가나다라마바사아');
+    expect(screen.getByText('8/8')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '사용 Tip 추가' }));
     fireEvent.change(screen.getByLabelText('사용 Tip 2'), { target: { value: '둘째 안내' } });
     fireEvent.click(screen.getByRole('button', { name: '사용 Tip 저장' }));
-    await waitFor(() => expect(useApp.getState().config?.usageTips).toEqual([long, '둘째 안내']));
-    expect(saveUsageTips).toHaveBeenCalledWith([long, '둘째 안내']);
+    await waitFor(() => expect(useApp.getState().config?.usageTips).toEqual(['가나다라마바사아', '둘째 안내']));
+    expect(saveUsageTips).toHaveBeenCalledWith(['가나다라마바사아', '둘째 안내']);
   });
 
   it('keeps saved text intact before measuring or after shrinking the header', () => {
@@ -195,10 +195,26 @@ describe('usage tip editor', () => {
     useAdmin.setState({ settings: { ...useAdmin.getState().settings!, usageTips: [long] } });
     useApp.setState({ usageTipLimit: 0 });
     render(<UsageTipTab />);
-    const input = screen.getByLabelText('사용 Tip 1') as HTMLTextAreaElement;
+    const input = screen.getByLabelText('사용 Tip 1') as HTMLInputElement;
     expect(input.value).toBe(long.trim());
-    expect(input.disabled).toBe(false);
+    expect(input.disabled).toBe(true);
     act(() => useApp.setState({ usageTipLimit: 5 }));
     expect(input.value).toBe(long.trim());
+    expect(input.maxLength).toBe(5);
+    expect(screen.getByRole('alert').textContent).toContain('한 줄 한도를 넘는 문구');
+    const save = screen.getByRole('button', { name: '사용 Tip 저장' }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.click(save);
+    expect(saveUsageTips).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: '짧은 안내' } });
+    expect(save.disabled).toBe(false);
+  });
+
+  it('updates the input limit when the tip box grows without changing the draft', () => {
+    render(<UsageTipTab />);
+    const input = screen.getByLabelText('사용 Tip 1') as HTMLInputElement;
+    act(() => useApp.setState({ usageTipLimit: 12, usageTipWidth: 168 }));
+    expect(input.maxLength).toBe(12);
+    expect(input.value).toBe('기존 안내');
   });
 });
