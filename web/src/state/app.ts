@@ -11,7 +11,6 @@ interface AppState {
   online: boolean;
   profile: Profile | null;
   showOnboarding: boolean;
-  showAdminConvert: boolean;
   showBackup: boolean;
   showSend: boolean;
   screen: 'main' | 'admin';
@@ -26,8 +25,6 @@ interface AppState {
   lastFetchedAt: string;
   statusText: string;
   replaceNotice: string | null;
-  showPassword: boolean;
-  passwordRequired: boolean;
   memoSyncText: string;
   patch: (partial: Partial<AppState>) => void;
   toast: (text: string) => void;
@@ -41,7 +38,6 @@ export const useApp = create<AppState>((set) => ({
   online: typeof navigator === 'undefined' ? true : navigator.onLine,
   profile: null,
   showOnboarding: false,
-  showAdminConvert: false,
   showBackup: false,
   showSend: false,
   screen: 'main',
@@ -56,8 +52,6 @@ export const useApp = create<AppState>((set) => ({
   lastFetchedAt: '',
   statusText: '',
   replaceNotice: null,
-  showPassword: false,
-  passwordRequired: false,
   memoSyncText: '',
   patch: (partial) => set(partial),
   toast: (text) => set((state) => ({ toasts: [...state.toasts, { id: toastSeq++, text }] })),

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { listLoginLocks, saveOfficers } from '../api/materials';
+import { saveOfficers } from '../api/materials';
 import type { Officer } from '../api/types';
 import { OfficersTab } from '../components/admin/OfficersTab';
 import { useAdmin } from '../state/admin';
@@ -10,10 +10,7 @@ vi.mock('../api/materials', async () => {
   const actual = await vi.importActual<typeof import('../api/materials')>('../api/materials');
   return {
     ...actual,
-    listLoginLocks: vi.fn(),
-    clearLoginLock: vi.fn(),
     saveOfficers: vi.fn(),
-    resetOfficerPassword: vi.fn(),
   };
 });
 
@@ -35,7 +32,6 @@ const lee: Officer = {
 
 describe('officer order', () => {
   beforeEach(() => {
-    vi.mocked(listLoginLocks).mockResolvedValue([]);
     vi.mocked(saveOfficers).mockResolvedValue([lee, kim]);
     useApp.setState({ profile: { role: 'admin', name: '관리자', position: '기획처', deviceId: 'd', createdAt: '2026-01-01T00:00:00.000Z' }, toasts: [] });
     useAdmin.setState({
@@ -61,7 +57,8 @@ describe('officer order', () => {
 
   it('drops an officer into a new place and saves that order', async () => {
     render(<OfficersTab />);
-    await waitFor(() => expect(screen.getByText('잠긴 로그인이 없습니다.')).toBeTruthy());
+    expect(screen.queryByText('로그인 잠금')).toBeNull();
+    expect(screen.queryByRole('button', { name: '비밀번호 초기화' })).toBeNull();
     const leeGrip = screen.getByRole('button', { name: '교무처장 이서연 순서 바꾸기' });
     const kimRow = screen.getByRole('button', { name: '기획처장 김민수 순서 바꾸기' }).parentElement;
     if (!kimRow) throw new Error('row missing');

@@ -1110,7 +1110,7 @@ describe('officers', () => {
   it('lets a person sign in only when position, name, and employee number are set', () => {
     expect(officerCanLogin(row)).toBe(true);
     expect(officerCanLogin({ ...row, name: ' ' })).toBe(false);
-    expect(officerCanLogin({ ...row, employeeNo: '' })).toBe(false);
+    expect(officerCanLogin({ ...row, employeeNo: '' })).toBe(true);
     expect(isAllowedRecipient(row.email)).toBe(true);
     expect(prepareOfficerList([{ ...row, email: 'kim@gmail.com' }])).toEqual({
       error: '연성대학교 메일(@yeonsung.ac.kr)만 등록할 수 있습니다.',

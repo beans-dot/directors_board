@@ -1,46 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
-import { clearLoginLock, listLoginLocks, saveOfficers, resetOfficerPassword } from '../../api/materials';
-import type { LoginLock, Officer } from '../../api/types';
+import { saveOfficers } from '../../api/materials';
+import type { Officer } from '../../api/types';
 import { moveOfficer, prepareOfficerList } from '../../domain/officers';
 import { messageOf, syncStoredOfficer } from '../../services/runtime';
 import { useAdmin } from '../../state/admin';
 import { useApp } from '../../state/app';
 import { Button } from '../common/Button';
 
-function lockLabel(lock: LoginLock): string {
-  if (lock.kind === 'address') return `접속 주소 ${lock.name}`;
-  return [lock.position, lock.name].filter(Boolean).join(' ');
-}
-
-function lockRemain(lockedUntil: number): string {
-  const minutes = Math.max(1, Math.ceil((lockedUntil - Date.now()) / 60000));
-  return `${minutes}분 남음`;
-}
-
 export function OfficersTab() {
   const settings = useAdmin((state) => state.settings);
   const [rows, setRows] = useState<Officer[]>([]);
-  const [locks, setLocks] = useState<LoginLock[] | null>(null);
-  const [pendingKey, setPendingKey] = useState('');
   const [draggingId, setDraggingId] = useState('');
   const [error, setError] = useState('');
   const dragId = useRef('');
   const hydrated = useRef(false);
   const supported = settings != null && Array.isArray(settings.officers);
-
-  useEffect(() => {
-    let alive = true;
-    void listLoginLocks()
-      .then((next) => {
-        if (alive) setLocks(next);
-      })
-      .catch((cause: unknown) => {
-        if (alive) setError(messageOf(cause));
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   useEffect(() => {
     if (hydrated.current || !supported || !settings?.officers) return;
@@ -84,44 +58,9 @@ export function OfficersTab() {
     return <p className="help">보직자 설정은 Apps Script 배포를 새 버전으로 갱신한 뒤에 사용할 수 있습니다.</p>;
   }
 
-  const unlock = (lock: LoginLock) => {
-    setPendingKey(lock.key);
-    setError('');
-    void clearLoginLock(lock.key)
-      .then((next) => {
-        setLocks(next);
-        useApp.getState().toast(`${lockLabel(lock)} 잠금을 풀었습니다.`);
-      })
-      .catch((cause: unknown) => setError(messageOf(cause)))
-      .finally(() => setPendingKey(''));
-  };
-
   return (
     <div>
-      <section className="login-locks">
-        <h3>로그인 잠금</h3>
-        <p className="help">
-          다섯 번 연속으로 틀리면 그 계정과 접속 주소가 15분 동안 멈춥니다. 여기서 풀어 주면 바로 다시 로그인할 수 있습니다.
-        </p>
-        {locks === null && <p className="help">잠금을 확인하는 중</p>}
-        {locks && locks.length === 0 && <p className="help">잠긴 로그인이 없습니다.</p>}
-        {locks?.map((lock) => (
-          <div className="lock-row" key={lock.key}>
-            <strong>{lockLabel(lock)}</strong>
-            <span>{lockRemain(lock.lockedUntil)}</span>
-            <button
-              className="btn btn-line"
-              type="button"
-              aria-label={`${lockLabel(lock)} 잠금 해제`}
-              disabled={pendingKey === lock.key}
-              onClick={() => unlock(lock)}
-            >
-              잠금 해제
-            </button>
-          </div>
-        ))}
-      </section>
-      <p className="help">직위, 이름, 사번을 등록합니다. 줄을 끌어 놓으면 로그인 화면의 순서가 됩니다. 저장해야 반영됩니다. 처음 로그인 비밀번호는 사번이고, 비밀번호 초기화도 사번으로 되돌립니다.</p>
+      <p className="help">직위와 이름을 등록하면 로그인 화면에서 바로 선택할 수 있습니다. 사번과 이메일은 선택 사항입니다. 줄을 끌어 놓으면 로그인 화면의 순서가 됩니다. 저장해야 반영됩니다.</p>
       {rows.map((row) => (
         <div
           className={draggingId === row.id ? 'officer-row dragging' : 'officer-row'}
@@ -165,6 +104,7 @@ export function OfficersTab() {
             사번
             <input
               value={row.employeeNo || ''}
+              placeholder="선택"
               autoComplete="off"
               onChange={(event) => update(row.id, { employeeNo: event.target.value })}
             />
@@ -177,17 +117,6 @@ export function OfficersTab() {
               onChange={(event) => update(row.id, { email: event.target.value })}
             />
           </label>
-          <button
-            className="btn btn-line"
-            type="button"
-            onClick={() => {
-              void resetOfficerPassword(row.id)
-                .then(() => useApp.getState().toast(`${row.name || row.position} 비밀번호를 사번으로 초기화했습니다.`))
-                .catch((cause: unknown) => setError(messageOf(cause)));
-            }}
-          >
-            비밀번호 초기화
-          </button>
           <button className="btn btn-line" type="button" onClick={() => setRows((current) => current.filter((item) => item.id !== row.id))}>
             삭제
           </button>

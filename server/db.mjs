@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
+// Password/lock columns and table remain inert for compatibility with existing DBs
+// and deployment rollback. Login only uses the selected account and session.
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS officers (
   id TEXT PRIMARY KEY,
@@ -11,7 +13,7 @@ CREATE TABLE IF NOT EXISTS officers (
   email TEXT NOT NULL DEFAULT '',
   employee_no TEXT NOT NULL,
   password_hash TEXT NOT NULL,
-  must_change INTEGER NOT NULL DEFAULT 1,
+  must_change INTEGER NOT NULL DEFAULT 0,
   session_version INTEGER NOT NULL DEFAULT 1,
   active INTEGER NOT NULL DEFAULT 1,
   sort_order INTEGER NOT NULL DEFAULT 0,
@@ -90,31 +92,6 @@ CREATE TABLE IF NOT EXISTS login_attempts (
   locked_until INTEGER NOT NULL
 );
 `;
-
-export function hashPassword(password) {
-  const n = Number(process.env.DEPTHM_SCRYPT_N || 16384);
-  const salt = crypto.randomBytes(16);
-  const hash = crypto.scryptSync(String(password), salt, 32, { N: n, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
-  return `scrypt:${n}:${salt.toString('base64url')}:${hash.toString('base64url')}`;
-}
-
-export function verifyPassword(password, stored) {
-  const parts = String(stored || '').split(':');
-  if (parts.length !== 4 || parts[0] !== 'scrypt') return false;
-  const n = Number(parts[1]);
-  if (!Number.isFinite(n) || n < 2) return false;
-  let salt;
-  let expected;
-  try {
-    salt = Buffer.from(parts[2], 'base64url');
-    expected = Buffer.from(parts[3], 'base64url');
-  } catch {
-    return false;
-  }
-  if (!salt.length || expected.length !== 32) return false;
-  const actual = crypto.scryptSync(String(password), salt, 32, { N: n, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
-  return crypto.timingSafeEqual(actual, expected);
-}
 
 export function tokenHash(token) {
   return crypto.createHash('sha256').update(String(token)).digest('hex');
@@ -203,24 +180,6 @@ export class Store {
       .all();
   }
 
-  attempt(key) {
-    return this.db.prepare('SELECT fails, locked_until FROM login_attempts WHERE key = ?').get(key) || null;
-  }
-
-  putAttempt(key, fails, lockedUntil) {
-    this.db
-      .prepare('INSERT INTO login_attempts (key, fails, locked_until) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET fails = excluded.fails, locked_until = excluded.locked_until')
-      .run(key, fails, lockedUntil);
-  }
-
-  clearAttempt(key) {
-    this.db.prepare('DELETE FROM login_attempts WHERE key = ?').run(key);
-  }
-
-  lockedAttempts(now) {
-    return this.db.prepare('SELECT key, locked_until FROM login_attempts WHERE locked_until > ? ORDER BY locked_until ASC').all(now);
-  }
-
   officer(id) {
     return this.db.prepare('SELECT * FROM officers WHERE id = ?').get(id) || null;
   }
@@ -275,7 +234,7 @@ export class Store {
       .prepare(
         'INSERT INTO sessions (token_hash, user_id, role, session_version, must_change, admin_tag, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       )
-      .run(row.tokenHash, row.userId, row.role, row.sessionVersion, row.mustChange ? 1 : 0, row.adminTag || '', row.expiresAt, row.createdAt);
+      .run(row.tokenHash, row.userId, row.role, row.sessionVersion, 0, row.adminTag || '', row.expiresAt, row.createdAt);
   }
 
   session(tokenHash) {
@@ -286,8 +245,8 @@ export class Store {
     this.db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash);
   }
 
-  touchSession(tokenHash, expiresAt, mustChange) {
-    this.db.prepare('UPDATE sessions SET expires_at = ?, must_change = ? WHERE token_hash = ?').run(expiresAt, mustChange ? 1 : 0, tokenHash);
+  touchSession(tokenHash, expiresAt) {
+    this.db.prepare('UPDATE sessions SET expires_at = ? WHERE token_hash = ?').run(expiresAt, tokenHash);
   }
 
   dropAdminSessions() {

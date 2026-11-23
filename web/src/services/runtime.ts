@@ -2,7 +2,6 @@ import { GasError, NetworkError } from '../api/client';
 import {
   MemoConflictError,
   bootFromServer,
-  changePassword,
   fetchRoster,
   fetchSession,
   downloadServerFile,
@@ -233,7 +232,6 @@ function profileFromSession(session: Awaited<ReturnType<typeof fetchSession>> & 
         name: session.name,
         position: session.position,
         role: 'admin',
-        mustChangePassword: session.mustChangePassword,
         createdAt,
         registeredAt: new Date().toISOString(),
       },
@@ -246,7 +244,6 @@ function profileFromSession(session: Awaited<ReturnType<typeof fetchSession>> & 
     position: session.position,
     role: 'user',
     officerId: session.userId,
-    mustChangePassword: session.mustChangePassword,
     createdAt,
     registeredAt: new Date().toISOString(),
   };
@@ -284,14 +281,11 @@ export async function boot(): Promise<void> {
     useApp.getState().patch({
       profile,
       showOnboarding: false,
-      showPassword: session.mustChangePassword,
-      passwordRequired: session.mustChangePassword,
       ready: true,
       online: true,
       statusText: '',
       screen: session.role === 'admin' ? 'admin' : 'main',
     });
-    if (session.mustChangePassword) return;
     startRemoteRefreshWatch();
     await refreshTree('load');
     await flushPendingMemos();
@@ -356,36 +350,15 @@ export async function syncStoredOfficer(profile: Profile | null, officers: Offic
   return next;
 }
 
-export async function loginWithPassword(officer: Officer, password: string): Promise<void> {
+export async function loginAsOfficer(officer: Officer): Promise<void> {
   const existing = useApp.getState().profile;
-  const session = await loginOfficer(officer.id, password);
+  const session = await loginOfficer(officer.id);
   const profile = profileFromSession(session, existing?.deviceId || createDeviceId(), existing?.createdAt || new Date().toISOString());
   await saveProfile(profile);
   useApp.getState().patch({
     profile,
     showOnboarding: false,
-    showPassword: session.mustChangePassword,
-    passwordRequired: session.mustChangePassword,
     statusText: '',
-  });
-  if (session.mustChangePassword) return;
-  startRemoteRefreshWatch();
-  await refreshTree('load');
-}
-
-export async function changeOwnPassword(currentPassword: string, newPassword: string): Promise<void> {
-  await changePassword(currentPassword, newPassword);
-  const profile = useApp.getState().profile;
-  if (!profile) return;
-  const openAdmin = profile.role === 'admin' && useApp.getState().passwordRequired;
-  const next = { ...profile, mustChangePassword: false };
-  await saveProfile(next);
-  useApp.getState().patch({
-    profile: next,
-    showPassword: false,
-    passwordRequired: false,
-    memoSyncText: '',
-    screen: openAdmin ? 'admin' : useApp.getState().screen,
   });
   startRemoteRefreshWatch();
   await refreshTree('load');
@@ -399,7 +372,6 @@ export async function refreshTree(
   reason: 'load' | 'refresh' | 'preload',
   options?: { expandMeeting?: boolean; background?: boolean; quiet?: boolean; retryMissing?: boolean },
 ): Promise<boolean> {
-  if (useApp.getState().profile?.mustChangePassword) return false;
   if (!navigator.onLine) {
     useTree.getState().patch({ folders: [], loading: false });
     if (!options?.quiet) useApp.getState().patch({ statusText: '서버와 연결하지 못했습니다. 회의자료를 표시하지 않습니다.', online: false });
@@ -491,7 +463,7 @@ function startRemoteRefreshWatch(): void {
 }
 
 async function pollRemoteRefresh(): Promise<void> {
-  if (!navigator.onLine || remotePollInflight || !useApp.getState().profile || useApp.getState().profile?.mustChangePassword) return;
+  if (!navigator.onLine || remotePollInflight || !useApp.getState().profile) return;
   remotePollInflight = true;
   try {
     const data = await pulseServer();
@@ -1015,24 +987,21 @@ export async function flushOutbox(): Promise<void> {
   await flushPendingMemos();
 }
 
-export async function loginAdmin(password: string): Promise<void> {
+export async function loginAdmin(): Promise<void> {
   const previous = useApp.getState().profile;
   const enteredFromGate = !previous?.name;
   try {
-    const session = await loginAdminAccount(password);
+    const session = await loginAdminAccount();
     const next = profileFromSession(session, previous?.deviceId || createDeviceId(), previous?.createdAt || new Date().toISOString());
     await saveProfile(next);
     useApp.getState().patch({
       profile: next,
-      showAdminConvert: false,
       showOnboarding: false,
-      showPassword: session.mustChangePassword,
-      passwordRequired: session.mustChangePassword,
       menuOpen: false,
-      screen: session.mustChangePassword ? 'main' : enteredFromGate ? 'admin' : useApp.getState().screen,
+      screen: enteredFromGate ? 'admin' : useApp.getState().screen,
     });
-    if (session.mustChangePassword) return;
     useApp.getState().toast('관리자로 전환했습니다.');
+    startRemoteRefreshWatch();
     await refreshTree('load');
   } catch (error) {
     if (enteredFromGate) {
@@ -1053,9 +1022,6 @@ export async function logoutAdmin(): Promise<void> {
     profile: null,
     screen: 'main',
     showOnboarding: true,
-    showAdminConvert: false,
-    showPassword: false,
-    passwordRequired: false,
     menuOpen: false,
     memoSyncText: '',
   });

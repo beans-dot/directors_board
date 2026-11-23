@@ -30,7 +30,6 @@ describe('admin account', () => {
     useApp.setState({
       profile: null,
       showOnboarding: false,
-      showAdminConvert: false,
       menuOpen: false,
       screen: 'main',
       toasts: [],
@@ -45,10 +44,10 @@ describe('admin account', () => {
       name: '관리자',
       position: '기획처',
       role: 'admin',
-      mustChangePassword: false,
     });
 
-    await loginAdmin('secret');
+    await loginAdmin();
+    expect(loginAdminAccount).toHaveBeenCalledWith();
 
     const next = useApp.getState().profile;
     expect(next?.name).toBe('관리자');
@@ -72,16 +71,16 @@ describe('admin account', () => {
     expect(screen.queryByRole('button', { name: '저장공간 정보' })).toBeNull();
     expect(screen.queryByRole('button', { name: '관리자 해제' })).toBeNull();
     fireEvent.click(label);
-    expect(screen.getByRole('menuitem', { name: '비밀번호 변경' })).toBeTruthy();
+    expect(screen.queryByRole('menuitem', { name: '비밀번호 변경' })).toBeNull();
     expect(screen.getByRole('menuitem', { name: '로그아웃' })).toBeTruthy();
   });
 
-  it('keeps the officer signed in when the admin password is wrong', async () => {
+  it('keeps the officer signed in when the admin request fails', async () => {
     useApp.setState({ profile: officer });
     await saveProfile(officer);
-    vi.mocked(loginAdminAccount).mockRejectedValue(new Error('비밀번호가 올바르지 않습니다.'));
+    vi.mocked(loginAdminAccount).mockRejectedValue(new Error('서버와 연결하지 못했습니다.'));
 
-    await expect(loginAdmin('nope')).rejects.toThrow('비밀번호가 올바르지 않습니다.');
+    await expect(loginAdmin()).rejects.toThrow('서버와 연결하지 못했습니다.');
     expect(useApp.getState().profile).toMatchObject({ name: '김민수', position: '기획처장', officerId: 'officer-1', role: 'user' });
   });
 
@@ -111,10 +110,7 @@ describe('admin account', () => {
     expect(screen.queryByRole('button', { name: '저장공간 정보' })).toBeNull();
     expect(screen.queryByRole('menuitem', { name: '비밀번호 변경' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '기획처장. 김민수' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: '비밀번호 변경' }));
-    expect(useApp.getState().showPassword).toBe(true);
-    expect(useApp.getState().passwordRequired).toBe(false);
-    fireEvent.click(screen.getByRole('button', { name: '기획처장. 김민수' }));
+    expect(screen.queryByRole('menuitem', { name: '비밀번호 변경' })).toBeNull();
     fireEvent.click(screen.getByRole('menuitem', { name: '로그아웃' }));
     await waitFor(() => expect(useApp.getState().profile).toBeNull());
     expect(useApp.getState().showOnboarding).toBe(true);

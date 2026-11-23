@@ -50,16 +50,6 @@ function UserMenu() {
             type="button"
             onClick={() => {
               setOpen(false);
-              useApp.getState().patch({ showPassword: true, passwordRequired: false });
-            }}
-          >
-            비밀번호 변경
-          </button>
-          <button
-            role="menuitem"
-            type="button"
-            onClick={() => {
-              setOpen(false);
               void logoutAdmin();
             }}
           >

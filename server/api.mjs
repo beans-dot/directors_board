@@ -3,19 +3,15 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { hashPassword, openStore, tokenHash, verifyPassword } from './db.mjs';
+import { openStore, tokenHash } from './db.mjs';
 import { composePdf, contentDisposition, zipPdfs } from './composePdf.mjs';
 import { autoMeetingPlan, nextFixedMeetingDate, todayKey, weekdayKey } from './holiday.mjs';
 import { BUCKETS, defaultDbPath, defaultMaterialsDir, ensureRoot, parseDateKey, parseFolderName, resolveInside, safePdfName } from './materials.mjs';
 
 const MAX_PDF_BYTES = 30 * 1024 * 1024;
 const SESSION_MS = 8 * 60 * 60 * 1000;
-const LOCK_MS = 15 * 60 * 1000;
-const MAX_FAILS = 5;
 const MEMO_TYPES = new Set(['pin', 'highlight', 'underline', 'ink']);
 const ID_RE = /^[A-Za-z0-9_-]{8,80}$/;
-const INITIAL_ADMIN_PASSWORD = 'admin';
-const DUMMY_HASH = hashPassword('not-a-real-password');
 
 function fail(status, code, message) {
   const error = new Error(message);
@@ -79,11 +75,6 @@ function sessionCookie(token, req, clear = false) {
   return `depthm_session=${value}; HttpOnly; Path=/materials-api; SameSite=Lax; Max-Age=${age}${secure}`;
 }
 
-function clientIp(req) {
-  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-  return forwarded || req.socket?.remoteAddress || '';
-}
-
 function requireMutation(req) {
   if (req.method === 'GET' || req.method === 'HEAD') return;
   if (req.headers['x-depthm-request'] !== '1') fail(403, 'FORBIDDEN', '요청을 확인할 수 없습니다.');
@@ -97,7 +88,6 @@ function issueSession(store, req, res, fields) {
     userId: fields.userId,
     role: fields.role,
     sessionVersion: fields.sessionVersion,
-    mustChange: fields.mustChange,
     adminTag: '',
     expiresAt,
     createdAt: nowIso(),
@@ -118,7 +108,6 @@ function currentSession(store, req) {
       userId: 'admin',
       name: '관리자',
       position: '기획처',
-      mustChange: adminMustChange(store),
       tokenHash: row.token_hash,
       sessionVersion: version,
     };
@@ -130,7 +119,6 @@ function currentSession(store, req) {
     userId: officer.id,
     name: officer.name,
     position: officer.position,
-    mustChange: officer.must_change === 1,
     tokenHash: row.token_hash,
     sessionVersion: officer.session_version,
     officer,
@@ -141,19 +129,13 @@ function requireUser(store, req) {
   const session = currentSession(store, req);
   if (!session) fail(401, 'UNAUTHORIZED', '로그인이 필요합니다.');
   if (Number(store.session(session.tokenHash)?.expires_at) - Date.now() < SESSION_MS / 2) {
-    store.touchSession(session.tokenHash, Date.now() + SESSION_MS, session.mustChange);
+    store.touchSession(session.tokenHash, Date.now() + SESSION_MS);
   }
   return session;
 }
 
-function requireReady(store, req) {
-  const session = requireUser(store, req);
-  if (session.mustChange) fail(403, 'PASSWORD_CHANGE_REQUIRED', '비밀번호를 새로 설정해 주세요.');
-  return session;
-}
-
 function requireAdmin(store, req) {
-  const session = requireReady(store, req);
+  const session = requireUser(store, req);
   if (session.role !== 'admin') fail(403, 'FORBIDDEN', '관리자만 이 작업을 할 수 있습니다.');
   return session;
 }
@@ -451,62 +433,9 @@ function saveMemo(store, session, ann, force) {
   });
 }
 
-function noteLogin(store, key) {
-  const row = store.attempt(key);
-  const fails = (row?.fails || 0) + 1;
-  const lockedUntil = fails >= MAX_FAILS ? Date.now() + LOCK_MS : 0;
-  store.putAttempt(key, fails >= MAX_FAILS ? 0 : fails, lockedUntil);
-  if (lockedUntil) fail(429, 'LOCKED', '로그인을 잠시 멈췄습니다. 15분 뒤에 다시 시도해 주세요.');
-}
-
-function ensureUnlocked(store, key) {
-  const row = store.attempt(key);
-  if (row && row.locked_until > Date.now()) fail(429, 'LOCKED', '로그인을 잠시 멈췄습니다. 15분 뒤에 다시 시도해 주세요.');
-}
-
-function loginLocks(store) {
-  const rows = [];
-  for (const row of store.lockedAttempts(Date.now())) {
-    if (row.key === 'user:admin') {
-      rows.push({ key: row.key, kind: 'account', name: '관리자', position: '기획처', lockedUntil: row.locked_until });
-      continue;
-    }
-    if (row.key.startsWith('user:')) {
-      const officer = store.officer(row.key.slice(5));
-      rows.push({
-        key: row.key,
-        kind: 'account',
-        name: officer?.name || '알 수 없는 계정',
-        position: officer?.position || '',
-        lockedUntil: row.locked_until,
-      });
-      continue;
-    }
-    if (row.key.startsWith('ip:') && row.key.length <= 120) {
-      rows.push({ key: row.key, kind: 'address', name: row.key.slice(3), position: '', lockedUntil: row.locked_until });
-    }
-  }
-  return rows;
-}
-
 function adminVersion(store) {
   const value = Number(store.setting('adminSessionVersion', '1'));
   return Number.isFinite(value) && value > 0 ? value : 1;
-}
-
-function adminMustChange(store) {
-  return store.setting('adminMustChange', '1') === '1';
-}
-
-function ensureAdminAccount(store) {
-  if (store.setting('adminPasswordHash', '')) return;
-  store.tx(() => {
-    if (store.setting('adminPasswordHash', '')) return;
-    store.putSetting('adminPasswordHash', hashPassword(INITIAL_ADMIN_PASSWORD));
-    store.putSetting('adminMustChange', '1');
-    store.putSetting('adminSessionVersion', '1');
-    store.dropAdminSessions();
-  });
 }
 
 function employeeNoOk(value) {
@@ -528,34 +457,23 @@ function saveOfficers(store, rows) {
       const employeeNo = String(raw.employeeNo || '').trim();
       if (!ID_RE.test(id)) fail(400, 'INVALID_INPUT', '보직자 번호가 올바르지 않습니다.');
       if (!position || position.length > 40 || name.length > 40) fail(400, 'INVALID_INPUT', '직위와 이름을 확인해 주세요.');
-      if (name && !employeeNoOk(employeeNo)) fail(400, 'INVALID_INPUT', '사번은 4자 이상 20자 이하의 영문과 숫자입니다.');
-      if (!name && employeeNo && !employeeNoOk(employeeNo)) fail(400, 'INVALID_INPUT', '사번은 4자 이상 20자 이하의 영문과 숫자입니다.');
+      if (employeeNo && !employeeNoOk(employeeNo)) fail(400, 'INVALID_INPUT', '사번은 4자 이상 20자 이하의 영문과 숫자입니다.');
       if (email && !/^[^\s@]+@yeonsung\.ac\.kr$/.test(email)) fail(400, 'INVALID_INPUT', '연성대학교 메일(@yeonsung.ac.kr)만 등록할 수 있습니다.');
       if (email && seenMail.has(email)) fail(400, 'INVALID_INPUT', '같은 메일 주소가 두 번 있습니다.');
       if (employeeNo && seenNo.has(employeeNo)) fail(400, 'INVALID_INPUT', '같은 사번이 두 번 있습니다.');
       if (email) seenMail.add(email);
       if (employeeNo) seenNo.add(employeeNo);
       const existing = store.officer(id);
-      let hash = existing?.password_hash || hashPassword(employeeNo || crypto.randomBytes(12).toString('hex'));
-      let mustChange = existing ? existing.must_change : 1;
-      let version = existing?.session_version || 1;
-      if (!existing) {
-        hash = hashPassword(employeeNo || '0000');
-        mustChange = 1;
-      } else if (employeeNo && existing.employee_no !== employeeNo && existing.must_change === 1) {
-        hash = hashPassword(employeeNo);
-        version += 1;
-        store.dropSessions(id);
-      }
       store.saveOfficer({
         id,
         position,
         name,
         email,
         employee_no: employeeNo,
-        password_hash: hash,
-        must_change: mustChange,
-        session_version: version,
+        // Retain legacy columns for existing databases and deployment rollback only.
+        password_hash: existing?.password_hash || '',
+        must_change: 0,
+        session_version: existing?.session_version || 1,
         active: 1,
         sort_order: ids.length + 1,
         created_at: existing?.created_at || stamp,
@@ -671,7 +589,6 @@ function ensureDateFolders(store, root) {
 export function createApiServer(root, options = {}) {
   const base = ensureRoot(root);
   const store = openStore(options.dbPath || defaultDbPath(base));
-  ensureAdminAccount(store);
   importLegacy(store, base);
   ensureDateFolders(store, base);
   const server = http.createServer((req, res) => {
@@ -704,59 +621,33 @@ async function handle(req, res, root, store) {
     if (req.method === 'POST' && pathname === '/login') {
       const body = JSON.parse((await readBody(req, 8192)).toString('utf8') || '{}');
       const officerId = String(body.officerId || '');
-      const ipKey = `ip:${clientIp(req)}`;
-      ensureUnlocked(store, `user:${officerId}`);
-      ensureUnlocked(store, ipKey);
       const officer = ID_RE.test(officerId) ? store.officer(officerId) : null;
-      const usable = officer && officer.active === 1 && officer.name && officer.employee_no;
-      const matches = usable ? verifyPassword(body.password, officer.password_hash) : (verifyPassword(String(body.password || ''), DUMMY_HASH), false);
-      if (!matches) {
-        noteLogin(store, `user:${officerId}`);
-        noteLogin(store, ipKey);
-        store.log({ userId: officerId || 'unknown', name: '', position: '', action: '로그인실패', target: '', at: nowIso() });
-        fail(401, 'WRONG_PASSWORD', '비밀번호가 올바르지 않습니다.');
+      if (!officer || officer.active !== 1 || !officer.name.trim() || !officer.position.trim()) {
+        fail(404, 'NOT_FOUND', '등록된 보직자를 선택해 주세요.');
       }
-      store.clearAttempt(`user:${officerId}`);
-      store.clearAttempt(ipKey);
       const token = issueSession(store, req, res, {
         userId: officer.id,
         role: 'user',
         sessionVersion: officer.session_version,
-        mustChange: officer.must_change === 1,
       });
       store.log({ userId: officer.id, name: officer.name, position: officer.position, action: '로그인', target: '', at: nowIso() });
       sendJson(res, 200, {
         ok: true,
-        data: { userId: officer.id, name: officer.name, position: officer.position, role: 'user', mustChangePassword: officer.must_change === 1 },
+        data: { userId: officer.id, name: officer.name, position: officer.position, role: 'user' },
       }, { 'Set-Cookie': sessionCookie(token, req) });
       return;
     }
     if (req.method === 'POST' && pathname === '/admin/login') {
-      const body = JSON.parse((await readBody(req, 8192)).toString('utf8') || '{}');
-      const ipKey = `ip:${clientIp(req)}`;
-      ensureUnlocked(store, 'user:admin');
-      ensureUnlocked(store, ipKey);
-      const hash = store.setting('adminPasswordHash', '');
-      const matches = hash ? verifyPassword(body.password, hash) : (verifyPassword(String(body.password || ''), DUMMY_HASH), false);
-      if (!matches) {
-        noteLogin(store, 'user:admin');
-        noteLogin(store, ipKey);
-        store.log({ userId: 'admin', name: '관리자', position: '기획처', action: '로그인실패', target: '', at: nowIso() });
-        fail(401, 'WRONG_PASSWORD', '비밀번호가 올바르지 않습니다.');
-      }
-      store.clearAttempt('user:admin');
-      store.clearAttempt(ipKey);
-      const mustChange = adminMustChange(store);
+      await readBody(req, 8192);
       const token = issueSession(store, req, res, {
         userId: 'admin',
         role: 'admin',
         sessionVersion: adminVersion(store),
-        mustChange,
       });
       store.log({ userId: 'admin', name: '관리자', position: '기획처', action: 'admin로그인', target: '', at: nowIso() });
       sendJson(res, 200, {
         ok: true,
-        data: { userId: 'admin', name: '관리자', position: '기획처', role: 'admin', mustChangePassword: mustChange },
+        data: { userId: 'admin', name: '관리자', position: '기획처', role: 'admin' },
       }, { 'Set-Cookie': sessionCookie(token, req) });
       return;
     }
@@ -776,46 +667,11 @@ async function handle(req, res, root, store) {
           name: session.name,
           position: session.position,
           role: session.role,
-          mustChangePassword: session.mustChange,
         },
       });
       return;
     }
-    if (req.method === 'POST' && pathname === '/password') {
-      const session = requireUser(store, req);
-      const body = JSON.parse((await readBody(req, 8192)).toString('utf8') || '{}');
-      const next = String(body.newPassword || '');
-      if (session.role === 'admin') {
-        if (!session.mustChange && !verifyPassword(body.currentPassword, store.setting('adminPasswordHash', ''))) fail(401, 'WRONG_PASSWORD', '현재 비밀번호가 올바르지 않습니다.');
-        if (next === INITIAL_ADMIN_PASSWORD) fail(400, 'INVALID_INPUT', '새 비밀번호는 admin과 달라야 합니다.');
-        if (next.length < 8 || next.length > 64) fail(400, 'INVALID_INPUT', '새 비밀번호는 8자 이상 64자 이하여야 합니다.');
-        const version = adminVersion(store) + 1;
-        store.tx(() => {
-          store.putSetting('adminPasswordHash', hashPassword(next));
-          store.putSetting('adminMustChange', '0');
-          store.putSetting('adminSessionVersion', String(version));
-          store.dropAdminSessions();
-        });
-        const token = issueSession(store, req, res, { userId: 'admin', role: 'admin', sessionVersion: version, mustChange: false });
-        sendJson(res, 200, { ok: true, data: { mustChangePassword: false } }, { 'Set-Cookie': sessionCookie(token, req) });
-        return;
-      }
-      if (session.role !== 'user') fail(403, 'FORBIDDEN', '보직자 계정에서 비밀번호를 바꿉니다.');
-      const officer = store.officer(session.userId);
-      if (!officer || (!session.mustChange && !verifyPassword(body.currentPassword, officer.password_hash))) fail(401, 'WRONG_PASSWORD', '현재 비밀번호가 올바르지 않습니다.');
-      if (next.length < 8 || next.length > 64) fail(400, 'INVALID_INPUT', '새 비밀번호는 8자 이상 64자 이하여야 합니다.');
-      if (next === officer.employee_no) fail(400, 'INVALID_INPUT', '새 비밀번호는 사번과 달라야 합니다.');
-      const version = officer.session_version + 1;
-      store.tx(() => {
-        store.saveOfficer({ ...officer, password_hash: hashPassword(next), must_change: 0, session_version: version, updated_at: nowIso() });
-        store.dropSessions(officer.id);
-      });
-      const token = issueSession(store, req, res, { userId: officer.id, role: 'user', sessionVersion: version, mustChange: false });
-      sendJson(res, 200, { ok: true, data: { mustChangePassword: false } }, { 'Set-Cookie': sessionCookie(token, req) });
-      return;
-    }
-
-    const sessionReady = () => requireReady(store, req);
+    const sessionReady = () => requireUser(store, req);
     if (req.method === 'GET' && pathname === '/boot') {
       sessionReady();
       sendJson(res, 200, { ok: true, data: { config: publicConfig(store), tree: treeOf(store) } });
@@ -929,7 +785,6 @@ async function handle(req, res, root, store) {
         name: row.name,
         email: row.email,
         employeeNo: row.employee_no,
-        mustChangePassword: row.must_change === 1,
         active: row.active === 1,
       }));
       sendJson(res, 200, {
@@ -978,43 +833,6 @@ async function handle(req, res, root, store) {
       const body = JSON.parse((await readBody(req, 200_000)).toString('utf8') || '{}');
       saveOfficers(store, body.officers);
       sendJson(res, 200, { ok: true, data: { officers: store.officersAdmin().filter((row) => row.active === 1).map(publicOfficer) } });
-      return;
-    }
-    const resetMatch = pathname.match(/^\/admin\/officers\/([A-Za-z0-9_-]+)\/reset-password$/);
-    if (req.method === 'POST' && resetMatch) {
-      requireAdmin(store, req);
-      const officer = store.officer(resetMatch[1]);
-      if (!officer || !officer.employee_no) fail(404, 'NOT_FOUND', '보직자를 찾을 수 없습니다.');
-      const version = officer.session_version + 1;
-      store.tx(() => {
-        store.saveOfficer({ ...officer, password_hash: hashPassword(officer.employee_no), must_change: 1, session_version: version, updated_at: nowIso() });
-        store.dropSessions(officer.id);
-      });
-      sendJson(res, 200, { ok: true, data: { reset: true } });
-      return;
-    }
-    if (req.method === 'GET' && pathname === '/admin/login-locks') {
-      requireAdmin(store, req);
-      sendJson(res, 200, { ok: true, data: { locks: loginLocks(store) } });
-      return;
-    }
-    if (req.method === 'POST' && pathname === '/admin/login-locks/clear') {
-      const session = requireAdmin(store, req);
-      const body = JSON.parse((await readBody(req, 8192)).toString('utf8') || '{}');
-      const key = String(body.key || '');
-      const found = loginLocks(store).find((row) => row.key === key);
-      if (!found) fail(404, 'NOT_FOUND', '잠긴 로그인을 찾을 수 없습니다.');
-      store.clearAttempt(key);
-      const target = found.kind === 'address' ? `접속 주소 ${found.name}` : `${found.position} ${found.name}`.trim();
-      store.log({
-        userId: session.userId,
-        name: session.name,
-        position: session.position,
-        action: '잠금해제',
-        target: target.slice(0, 180),
-        at: nowIso(),
-      });
-      sendJson(res, 200, { ok: true, data: { locks: loginLocks(store) } });
       return;
     }
     if (req.method === 'POST' && pathname === '/admin/meetings') {
@@ -1240,7 +1058,6 @@ function publicOfficer(row) {
     name: row.name,
     email: row.email,
     employeeNo: row.employee_no,
-    mustChangePassword: row.must_change === 1,
   };
 }
 

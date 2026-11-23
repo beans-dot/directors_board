@@ -23,7 +23,6 @@ describe('file change alert', () => {
       profile: { ...admin, role: 'user', adminToken: undefined },
       replaceNotice: notice,
       showOnboarding: false,
-      showAdminConvert: false,
       showBackup: false,
       showSend: false,
       screen: 'main',

@@ -3,7 +3,6 @@ import type {
   DateFolder,
   FilePayload,
   MeetingFolderRef,
-  LoginLock,
   Officer,
   PublicConfig,
 } from './types';
@@ -106,7 +105,6 @@ export interface SessionUser {
   name: string;
   position: string;
   role: 'user' | 'admin';
-  mustChangePassword: boolean;
 }
 
 export async function fetchSession(): Promise<SessionUser | null> {
@@ -121,24 +119,23 @@ export async function fetchSession(): Promise<SessionUser | null> {
   return readJson(response);
 }
 
-export async function loginOfficer(officerId: string, password: string): Promise<SessionUser> {
+export async function loginOfficer(officerId: string): Promise<SessionUser> {
   const response = await fetch(`${BASE}/login`, {
     method: 'POST',
     credentials: 'include',
     headers: requestHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ officerId, password }),
+    body: JSON.stringify({ officerId }),
   });
   return readJson(response);
 }
 
-export async function loginAdminAccount(password: string): Promise<SessionUser> {
+export async function loginAdminAccount(): Promise<SessionUser> {
   let response: Response;
   try {
     response = await fetch(`${BASE}/admin/login`, {
       method: 'POST',
       credentials: 'include',
       headers: requestHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ password }),
     });
   } catch {
     throw new Error('서버와 연결하지 못했습니다.');
@@ -156,16 +153,6 @@ export async function logoutSession(): Promise<void> {
   } catch {
     /* 이 기기의 화면은 닫는다. */
   }
-}
-
-export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
-  const response = await fetch(`${BASE}/password`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: requestHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ currentPassword, newPassword }),
-  });
-  await readJson(response);
 }
 
 export async function listMaterialFolders(): Promise<MeetingFolderRef[] | null> {
@@ -323,35 +310,6 @@ export async function saveOfficers(officers: Officer[]): Promise<Officer[]> {
   });
   const data = await readJson<{ officers: Officer[] }>(response);
   return data.officers;
-}
-
-export async function listLoginLocks(): Promise<LoginLock[]> {
-  const response = await fetch(`${BASE}/admin/login-locks`, { credentials: 'include' });
-  const data = await readJson<{ locks: LoginLock[] }>(response);
-  return data.locks;
-}
-
-export async function clearLoginLock(key: string): Promise<LoginLock[]> {
-  const response = await fetch(`${BASE}/admin/login-locks/clear`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: requestHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ key }),
-  });
-  const data = await readJson<{ locks: LoginLock[] }>(response);
-  return data.locks;
-}
-
-export async function resetOfficerPassword(officerId: string): Promise<void> {
-  const response = await fetch(
-    `${BASE}/admin/officers/${encodeURIComponent(officerId)}/reset-password`,
-    {
-      method: 'POST',
-      credentials: 'include',
-      headers: requestHeaders(),
-    },
-  );
-  await readJson(response);
 }
 
 export async function saveUsageTips(usageTips: string[]): Promise<string[]> {

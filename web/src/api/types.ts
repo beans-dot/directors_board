@@ -8,16 +8,7 @@ export interface Officer {
   name: string;
   email: string;
   employeeNo?: string;
-  mustChangePassword?: boolean;
   ready?: boolean;
-}
-
-export interface LoginLock {
-  key: string;
-  kind: 'account' | 'address';
-  name: string;
-  position: string;
-  lockedUntil: number;
 }
 
 export interface DriveNode {
@@ -45,7 +36,6 @@ export interface Profile {
   position: string;
   role: Role;
   officerId?: string;
-  mustChangePassword?: boolean;
   adminToken?: string;
   adminTokenExp?: number;
   savedEmail?: string;

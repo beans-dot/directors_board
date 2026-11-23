@@ -434,16 +434,6 @@ select:focus-visible {
   margin: 10px 0 0;
   line-height: 1.55;
 }
-.login-notice {
-  margin: 12px 0 0;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: #f4f7fb;
-  color: var(--ink);
-  font-size: 14px;
-  font-weight: 700;
-  line-height: 1.5;
-}
 .login-list {
   display: flex;
   flex-direction: column;
@@ -516,25 +506,9 @@ select:focus-visible {
 .login-foot .tiny-link:hover:not(:disabled) {
   text-decoration: underline;
 }
-.login-locks {
-  margin-bottom: 22px;
-}
-.login-locks h3 {
-  margin: 0 0 8px;
-}
-.lock-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  margin: 8px 0;
-}
-.lock-row strong {
-  min-width: 160px;
-}
 .officer-row {
   display: grid;
-  grid-template-columns: 28px 1fr 1fr 0.8fr 1fr auto auto;
+  grid-template-columns: 28px 1fr 1fr 0.8fr 1fr auto;
   gap: 8px;
   align-items: end;
   margin-bottom: 8px;

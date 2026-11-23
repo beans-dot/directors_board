@@ -23,7 +23,6 @@ export function asAdminAccount(profile: Profile, auth?: { adminToken?: string; a
     name: ADMIN_NAME,
     position: ADMIN_POSITION,
     role: 'admin',
-    mustChangePassword: profile.mustChangePassword,
     adminToken: auth?.adminToken ?? profile.adminToken,
     adminTokenExp: auth?.adminTokenExp ?? profile.adminTokenExp,
     createdAt: profile.createdAt,

@@ -32,7 +32,6 @@ describe('materials folders', () => {
   });
 
   it('rejects a meeting request without an admin session', async () => {
-    process.env.DEPTHM_SCRYPT_N = '1024';
     const server = createApiServer(root, { dbPath: path.join(root, '.depthm.sqlite') });
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     const port = server.address().port;
@@ -47,17 +46,9 @@ describe('materials folders', () => {
       const session = await fetch(`http://127.0.0.1:${port}/admin/login`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ password: 'admin' }),
       });
       assert.equal(session.status, 200);
-      const firstCookie = String(session.headers.get('set-cookie') || '').split(';')[0];
-      const changed = await fetch(`http://127.0.0.1:${port}/password`, {
-        method: 'POST',
-        headers: { ...headers, Cookie: firstCookie },
-        body: JSON.stringify({ currentPassword: 'admin', newPassword: 'admin-secret-1' }),
-      });
-      assert.equal(changed.status, 200);
-      const cookie = String(changed.headers.get('set-cookie') || '').split(';')[0];
+      const cookie = String(session.headers.get('set-cookie') || '').split(';')[0];
       const created = await fetch(`http://127.0.0.1:${port}/admin/meetings`, {
         method: 'POST',
         headers: { ...headers, Cookie: cookie },

@@ -4,8 +4,6 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-process.env.DEPTHM_SCRYPT_N = '1024';
-
 const { createApiServer } = await import('./api.mjs');
 const { PDFDocument, StandardFonts } = await import('pdf-lib');
 
@@ -40,27 +38,16 @@ function cookieOf(header) {
 }
 
 async function becomeAdmin(port) {
-  const login = await json(port, 'POST', '/admin/login', { password: 'admin' });
+  const login = await json(port, 'POST', '/admin/login');
   assert.equal(login.status, 200);
-  assert.equal(login.payload.data.mustChangePassword, true);
-  const blocked = await json(port, 'GET', '/admin/home', null, cookieOf(login.cookie));
-  assert.equal(blocked.status, 403);
-  const same = await json(port, 'POST', '/password', { currentPassword: 'admin', newPassword: 'admin' }, cookieOf(login.cookie));
-  assert.equal(same.status, 400);
-  const changed = await json(port, 'POST', '/password', { newPassword: 'admin-secret-1' }, cookieOf(login.cookie));
-  assert.equal(changed.status, 200);
-  assert.equal(changed.payload.data.mustChangePassword, false);
-  const missingCurrent = await json(port, 'POST', '/password', { newPassword: 'admin-secret-2' }, cookieOf(changed.cookie));
-  assert.equal(missingCurrent.status, 401);
-  const stale = await json(port, 'POST', '/admin/login', { password: 'admin' });
-  assert.equal(stale.status, 401);
-  return cookieOf(changed.cookie);
+  const home = await json(port, 'GET', '/admin/home', null, cookieOf(login.cookie));
+  assert.equal(home.status, 200);
+  return cookieOf(login.cookie);
 }
 
 async function adminSession(port) {
-  const login = await json(port, 'POST', '/admin/login', { password: 'admin-secret-1' });
+  const login = await json(port, 'POST', '/admin/login');
   assert.equal(login.status, 200);
-  assert.equal(login.payload.data.mustChangePassword, false);
   return cookieOf(login.cookie);
 }
 
@@ -131,19 +118,10 @@ describe('account memos and downloads', () => {
       });
       assert.equal(asUser.status, 401);
 
-      const loginA = await json(port, 'POST', '/login', { officerId: 'user_aaaa1111', password: '20240001' });
+      const loginA = await json(port, 'POST', '/login', { officerId: 'user_aaaa1111' });
       assert.equal(loginA.status, 200);
-      assert.equal(loginA.payload.data.mustChangePassword, true);
       assert.equal(loginA.payload.data.userId, 'user_aaaa1111');
-      const cookieA = cookieOf(loginA.cookie);
-      const blocked = await json(port, 'GET', '/tree', null, cookieA);
-      assert.equal(blocked.status, 403);
-
-      const changed = await json(port, 'POST', '/password', { newPassword: 'meeting-0812' }, cookieA);
-      assert.equal(changed.status, 200);
-      const cookieA2 = cookieOf(changed.cookie);
-      const missingCurrent = await json(port, 'POST', '/password', { newPassword: 'meeting-9999' }, cookieA2);
-      assert.equal(missingCurrent.status, 401);
+      const cookieA2 = cookieOf(loginA.cookie);
       const tree = await json(port, 'GET', '/tree', null, cookieA2);
       assert.equal(tree.status, 200);
       assert.equal(tree.payload.data.folders[0].id, meetingId);
@@ -172,10 +150,8 @@ describe('account memos and downloads', () => {
       const clash = await json(port, 'PUT', '/memos', { annotation: { ...memo, content: '다른 내용', version: 1 } }, cookieA2);
       assert.equal(clash.status, 409);
 
-      const loginB = await json(port, 'POST', '/login', { officerId: 'user_bbbb2222', password: '20240002' });
-      const cookieB = cookieOf(loginB.cookie);
-      await json(port, 'POST', '/password', { currentPassword: '20240002', newPassword: 'other-pass1' }, cookieB);
-      const cookieB2 = cookieOf((await json(port, 'POST', '/login', { officerId: 'user_bbbb2222', password: 'other-pass1' })).cookie);
+      const loginB = await json(port, 'POST', '/login', { officerId: 'user_bbbb2222' });
+      const cookieB2 = cookieOf(loginB.cookie);
       const seenByB = await json(port, 'GET', `/memos?fileId=${fileId}`, null, cookieB2);
       assert.equal(seenByB.payload.data.annotations.length, 0);
       const deniedUpload = await fetch(`http://127.0.0.1:${port}/admin/files/${fileId}/delete`, {
@@ -193,9 +169,8 @@ describe('account memos and downloads', () => {
     const again = createApiServer(root, { dbPath });
     const port2 = await listen(again);
     try {
-      const loginA = await json(port2, 'POST', '/login', { officerId: 'user_aaaa1111', password: 'meeting-0812' });
+      const loginA = await json(port2, 'POST', '/login', { officerId: 'user_aaaa1111' });
       assert.equal(loginA.status, 200);
-      assert.equal(loginA.payload.data.mustChangePassword, false);
       const cookieA = cookieOf(loginA.cookie);
       const tree = await json(port2, 'GET', '/tree', null, cookieA);
       const file = tree.payload.data.folders[0].children.find((child) => child.name === '본문').children[0];
@@ -261,18 +236,13 @@ describe('account memos and downloads', () => {
       assert.equal(keptMemo.payload.data.annotations[0].content, '수정한 메모');
 
       const reset = await json(port2, 'POST', '/admin/officers/user_aaaa1111/reset-password', {}, adminCookie);
-      assert.equal(reset.status, 200);
-      const oldPassword = await json(port2, 'POST', '/login', { officerId: 'user_aaaa1111', password: 'meeting-0812' });
-      assert.equal(oldPassword.status, 401);
-      const employeePassword = await json(port2, 'POST', '/login', { officerId: 'user_aaaa1111', password: '20240001' });
-      assert.equal(employeePassword.status, 200);
-      assert.equal(employeePassword.payload.data.mustChangePassword, true);
+      assert.equal(reset.status, 404);
     } finally {
       await new Promise((resolve) => again.close(resolve));
     }
   });
 
-  it('lets an admin see and clear a login lock', async () => {
+  it('ignores legacy password flags and locks, including existing sessions after restart', async () => {
     const lockRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'depthm-lock-'));
     const server = createApiServer(lockRoot, { dbPath: path.join(lockRoot, '.depthm.sqlite') });
     const port = await listen(server);
@@ -290,48 +260,37 @@ describe('account memos and downloads', () => {
         admin,
       );
       assert.equal(saved.status, 200);
-      assert.equal((await json(port, 'GET', '/admin/login-locks')).status, 401);
-      const opened = await json(port, 'POST', '/login', { officerId: 'user_lock3333', password: '20249999' });
+      server.store.db.prepare('UPDATE officers SET must_change = 1, password_hash = ?').run('legacy-hash');
+      server.store.putSetting('adminMustChange', '1');
+      server.store.putSetting('adminPasswordHash', 'legacy-admin-hash');
+      const lock = server.store.db.prepare('INSERT INTO login_attempts (key, fails, locked_until) VALUES (?, 0, ?)');
+      for (const key of ['user:user_lock3333', 'user:admin', 'ip:127.0.0.1']) lock.run(key, Date.now() + 900_000);
+      const opened = await json(port, 'POST', '/login', { officerId: 'user_lock3333' });
       assert.equal(opened.status, 200);
-
-      for (let i = 0; i < 4; i += 1) {
-        const wrong = await json(port, 'POST', '/login', { officerId: 'user_lock3333', password: 'wrong-pass' });
-        assert.equal(wrong.status, 401);
+      const cookie = cookieOf(opened.cookie);
+      server.store.db.exec('UPDATE sessions SET must_change = 1');
+      assert.equal((await json(port, 'GET', '/boot', null, cookie)).status, 200);
+      assert.equal((await json(port, 'GET', '/admin/home', null, admin)).status, 200);
+      assert.equal((await json(port, 'POST', '/admin/login')).status, 200);
+      for (let i = 0; i < 7; i += 1) {
+        assert.equal((await json(port, 'POST', '/login', { officerId: 'missing_user' })).status, 404);
       }
-      const locked = await json(port, 'POST', '/login', { officerId: 'user_lock3333', password: 'wrong-pass' });
-      assert.equal(locked.status, 429);
-      const blocked = await json(port, 'POST', '/login', { officerId: 'user_lock3333', password: '20249999' });
-      assert.equal(blocked.status, 429);
-
-      const listed = await json(port, 'GET', '/admin/login-locks', null, admin);
-      assert.equal(listed.status, 200);
-      const account = listed.payload.data.locks.find((row) => row.key === 'user:user_lock3333');
-      assert.equal(account.name, '김민수');
-      assert.equal(account.position, '기획처장');
-      assert.equal(account.kind, 'account');
-      const cleared = await json(port, 'POST', '/admin/login-locks/clear', { key: 'user:user_lock3333' }, admin);
-      assert.equal(cleared.status, 200);
-      assert.equal(cleared.payload.data.locks.some((row) => row.key === 'user:user_lock3333'), false);
-      const again = await json(port, 'POST', '/login', { officerId: 'user_lock3333', password: '20249999' });
-      assert.equal(again.status, 200);
-
-      for (let i = 0; i < 5; i += 1) {
-        await json(port, 'POST', '/login', { officerId: `user_other${i}444`, password: 'wrong-pass' });
-      }
-      const addressBlocked = await json(port, 'POST', '/login', { officerId: 'user_lock3333', password: '20249999' });
-      assert.equal(addressBlocked.status, 429);
-      const addresses = await json(port, 'GET', '/admin/login-locks', null, admin);
-      const address = addresses.payload.data.locks.find((row) => row.kind === 'address');
-      assert.equal(address.kind, 'address');
-      const addressCleared = await json(port, 'POST', '/admin/login-locks/clear', { key: address.key }, admin);
-      assert.equal(addressCleared.status, 200);
-      assert.equal(addressCleared.payload.data.locks.some((row) => row.kind === 'address'), false);
-      const afterAddress = await json(port, 'POST', '/login', { officerId: 'user_lock3333', password: '20249999' });
-      assert.equal(afterAddress.status, 200);
-      const missing = await json(port, 'POST', '/admin/login-locks/clear', { key: address.key }, admin);
-      assert.equal(missing.status, 404);
-    } finally {
+      assert.equal((await json(port, 'POST', '/login', { officerId: 'user_lock3333' })).status, 200);
+      assert.equal((await json(port, 'POST', '/password', {}, cookie)).status, 404);
+      assert.equal((await json(port, 'GET', '/admin/login-locks', null, admin)).status, 404);
+      assert.equal((await json(port, 'POST', '/admin/login-locks/clear', {}, admin)).status, 404);
       await new Promise((resolve) => server.close(resolve));
+      const restarted = createApiServer(lockRoot, { dbPath: path.join(lockRoot, '.depthm.sqlite') });
+      try {
+        const port2 = await listen(restarted);
+        assert.equal((await json(port2, 'GET', '/boot', null, cookie)).status, 200);
+        assert.equal((await json(port2, 'GET', '/admin/home', null, admin)).status, 200);
+        assert.equal((await json(port2, 'POST', '/login', { officerId: 'user_lock3333' })).status, 200);
+      } finally {
+        await new Promise((resolve) => restarted.close(resolve));
+      }
+    } finally {
+      if (server.listening) await new Promise((resolve) => server.close(resolve));
     }
   });
 
@@ -343,10 +302,12 @@ describe('account memos and downloads', () => {
       const admin = await becomeAdmin(port);
       const officers = [
         { id: 'user_order_kim', position: '기획처장', name: '김민수', email: 'kim.order@yeonsung.ac.kr', employeeNo: '20241111' },
-        { id: 'user_order_lee', position: '교무처장', name: '이서연', email: 'lee.order@yeonsung.ac.kr', employeeNo: '20242222' },
+        { id: 'user_order_lee', position: '교무처장', name: '이서연', email: 'lee.order@yeonsung.ac.kr' },
       ];
       const saved = await json(port, 'PUT', '/admin/officers', { officers }, admin);
       assert.equal(saved.status, 200);
+      const noEmployeeNo = await json(port, 'POST', '/login', { officerId: 'user_order_lee' });
+      assert.equal(noEmployeeNo.status, 200);
       const first = await json(port, 'GET', '/roster');
       assert.deepEqual(first.payload.data.officers.map((row) => row.id), ['user_order_kim', 'user_order_lee']);
       const reversed = await json(port, 'PUT', '/admin/officers', { officers: [officers[1], officers[0]] }, admin);
@@ -355,6 +316,11 @@ describe('account memos and downloads', () => {
       assert.deepEqual(second.payload.data.officers.map((row) => row.id), ['user_order_lee', 'user_order_kim']);
       const home = await json(port, 'GET', '/admin/home', null, admin);
       assert.deepEqual(home.payload.data.settings.officers.map((row) => row.id), ['user_order_lee', 'user_order_kim']);
+      const cookie = cookieOf(noEmployeeNo.cookie);
+      await json(port, 'POST', '/logout', null, cookie);
+      assert.equal((await json(port, 'GET', '/boot', null, cookie)).status, 401);
+      await json(port, 'PUT', '/admin/officers', { officers: [officers[0]] }, admin);
+      assert.equal((await json(port, 'POST', '/login', { officerId: 'user_order_lee' })).status, 404);
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }

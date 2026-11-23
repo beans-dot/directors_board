@@ -5,9 +5,7 @@ import { Header } from './components/layout/Header';
 import { LeftPanel } from './components/layout/LeftPanel';
 import { MainArea } from './components/layout/MainArea';
 import { BackupPanel } from './components/memo/BackupPanel';
-import { AdminConvertDialog } from './components/onboarding/AdminConvertDialog';
 import { FirstVisitDialog } from './components/onboarding/FirstVisitDialog';
-import { PasswordDialog } from './components/onboarding/PasswordDialog';
 import { showFileChangeAlert } from './domain/changeNotice';
 import { boot, overwriteConflictMemo, reloadConflictMemo } from './services/runtime';
 import { useApp } from './state/app';
@@ -59,8 +57,6 @@ export default function App() {
         </div>
       )}
       <FirstVisitDialog />
-      <PasswordDialog />
-      <AdminConvertDialog />
       <BackupPanel />
       {showSend && (
         <Suspense fallback={null}>
