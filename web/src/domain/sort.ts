@@ -2,15 +2,7 @@ import type { DateFolder, DriveNode } from '../api/types';
 
 const collator = new Intl.Collator('ko', { numeric: true, sensitivity: 'base' });
 
-/** 별첨 이름이 `[부서명`으로 시작할 때의 나열 순서. 산학 자료는 산학협력단으로도 시작합니다. */
-const ATTACHMENT_OFFICES = [
-  ['기획처'],
-  ['교무처'],
-  ['입학홍보처'],
-  ['학생취업처'],
-  ['산학협력처', '산학협력단'],
-  ['행정지원처'],
-];
+const ATTACHMENT_OFFICES = ['기획', '교무', '입학', '학생', '산학', '행정'];
 
 export function naturalCompare(a: string, b: string): number {
   const aNum = /^\d/.test(a);
@@ -24,11 +16,8 @@ export function sortByName<T>(items: T[], nameOf: (item: T) => string): T[] {
 }
 
 function attachmentOfficeRank(name: string): number {
-  const trimmed = name.trim();
-  const bracket = trimmed.startsWith('[') || trimmed.startsWith('［');
-  if (!bracket) return ATTACHMENT_OFFICES.length;
-  const body = trimmed.slice(1).trimStart();
-  const index = ATTACHMENT_OFFICES.findIndex((names) => names.some((office) => body.startsWith(office)));
+  const office = /[[［]\s*(기획|교무|입학|학생|산학|행정)/.exec(name)?.[1];
+  const index = ATTACHMENT_OFFICES.indexOf(office || '');
   return index === -1 ? ATTACHMENT_OFFICES.length : index;
 }
 
@@ -38,8 +27,15 @@ function compareAttachmentNames(a: string, b: string): number {
   return naturalCompare(a, b);
 }
 
-function sortAttachments(nodes: DriveNode[]): DriveNode[] {
-  return nodes.slice().sort((a, b) => compareAttachmentNames(a.name, b.name));
+function sortFiles(nodes: DriveNode[], attachment: boolean): DriveNode[] {
+  return nodes.slice().sort((a, b) => {
+    // The server's saved order includes admin drag-and-drop changes.
+    if (a.sortOrder != null || b.sortOrder != null) {
+      const order = (a.sortOrder ?? Number.MAX_SAFE_INTEGER) - (b.sortOrder ?? Number.MAX_SAFE_INTEGER);
+      if (order !== 0) return order;
+    }
+    return attachment ? compareAttachmentNames(a.name, b.name) : naturalCompare(a.name, b.name);
+  });
 }
 
 function isDateFolder(node: DriveNode): node is DateFolder {
@@ -100,8 +96,7 @@ function sortNode(node: DriveNode): DriveNode {
   if (!visible.children) return visible;
   const children = visible.children.map(sortNode).filter(keepMaterialFolder);
   if (isDateFolder(visible)) return { ...visible, children: arrangeMeetingChildren(children) };
-  if (visible.name.trim() === '별첨') return { ...visible, children: sortAttachments(children) };
-  return { ...visible, children: sortByName(children, (item) => item.name) };
+  return { ...visible, children: sortFiles(children, visible.name.trim() === '별첨') };
 }
 
 export function sortDriveTree(folders: DateFolder[]): DateFolder[] {

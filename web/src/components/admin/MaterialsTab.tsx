@@ -6,6 +6,7 @@ import {
   loadAdminHome,
   reorderMaterialFiles,
   replaceMaterialPdf,
+  setMaterialChangeNotice,
   uploadMaterialPdf,
 } from '../../api/materials';
 import type { AdminSettings, MeetingFileRecord, MeetingRecord } from '../../api/types';
@@ -13,6 +14,7 @@ import { dateKeyToFolderDate, formatMeetingLabel, parseDateInput } from '../../d
 import { messageOf, refreshTree } from '../../services/runtime';
 import { useAdmin } from '../../state/admin';
 import { useApp } from '../../state/app';
+import { useTree } from '../../state/tree';
 import { Button } from '../common/Button';
 
 const BUCKETS = ['본문', '별첨', '규정'] as const;
@@ -212,6 +214,23 @@ export function MaterialsTab() {
     setFileBusy(true);
     void reorderMaterialFiles(ids)
       .then(() => reloadAdmin())
+      .then(() => refreshTree('refresh'))
+      .catch((error: unknown) => useApp.getState().toast(messageOf(error)))
+      .finally(() => setFileBusy(false));
+  };
+
+  const toggleNotice = (file: MeetingFileRecord, enabled: boolean) => {
+    if (locked) return;
+    setFileBusy(true);
+    void setMaterialChangeNotice(file.id, enabled)
+      .then((changeNotices) => {
+        const current = useAdmin.getState().settings;
+        if (current) useAdmin.getState().patch({ settings: { ...current, changeNotices } });
+        useTree.getState().patch({ changeNotices });
+        const config = useApp.getState().config;
+        if (config) useApp.getState().patch({ config: { ...config, changeNotices } });
+        useApp.getState().toast(enabled ? '변경 알림을 켰습니다.' : '변경 알림을 껐습니다.');
+      })
       .catch((error: unknown) => useApp.getState().toast(messageOf(error)))
       .finally(() => setFileBusy(false));
   };
@@ -345,6 +364,7 @@ export function MaterialsTab() {
                     <strong>{bucket}</strong>
                     <span>{count}개</span>
                   </header>
+                  {bucket === '별첨' && <p className="help">처음 올릴 때 기획 → 교무 → 입학 → 학생 → 산학 → 행정 순서, 같은 부서는 파일명·번호 오름차순으로 정렬합니다. 끌어서 순서를 바꾼 뒤에는 그 순서를 유지하고 추가 파일은 맨 뒤에 놓습니다.</p>}
                   <label
                     className={dragBucket === bucket ? 'material-drop on' : 'material-drop'}
                     onDragOver={(event) => {
@@ -389,7 +409,9 @@ export function MaterialsTab() {
                           </p>
                         )}
                         <ul className="material-files">
-                          {files.map((file) => (
+                          {files.map((file) => {
+                            const noticed = (settings.changeNotices || []).some((notice) => notice.fileId === file.id);
+                            return (
                             <li
                               className={draggingId === file.id ? 'material-file dragging' : 'material-file'}
                               key={file.id}
@@ -428,6 +450,16 @@ export function MaterialsTab() {
                                 <small>{formatBytes(file.size)}</small>
                               </span>
                               <span className="material-file-actions">
+                                <button
+                                  className={`btn btn-sm material-notice${noticed ? ' on' : ''}`}
+                                  type="button"
+                                  aria-label={`${file.name} 변경 알림`}
+                                  aria-pressed={noticed}
+                                  disabled={locked}
+                                  onClick={() => toggleNotice(file, !noticed)}
+                                >
+                                  {noticed ? '변경 알림 켜짐' : '변경 알림'}
+                                </button>
                                 <label className="btn btn-line btn-sm">
                                   변경
                                   <input
@@ -454,7 +486,8 @@ export function MaterialsTab() {
                                 </button>
                               </span>
                             </li>
-                          ))}
+                            );
+                          })}
                         </ul>
                       </div>
                     ))

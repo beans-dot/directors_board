@@ -7,6 +7,7 @@ import { openStore, tokenHash } from './db.mjs';
 import { composePdf, contentDisposition, zipPdfs } from './composePdf.mjs';
 import { autoMeetingPlan, nextFixedMeetingDate, todayKey, weekdayKey } from './holiday.mjs';
 import { BUCKETS, defaultDbPath, defaultMaterialsDir, ensureRoot, parseDateKey, parseFolderName, resolveInside, safePdfName } from './materials.mjs';
+import { manualOrderKey, preserveExistingOrder, sortUploadedAttachments } from './fileOrder.mjs';
 
 const MAX_PDF_BYTES = 30 * 1024 * 1024;
 const SESSION_MS = 8 * 60 * 60 * 1000;
@@ -140,18 +141,30 @@ function requireAdmin(store, req) {
   return session;
 }
 
+function fileChangeNotices(store) {
+  let raw;
+  try {
+    raw = JSON.parse(store.setting('changeNotices', '[]'));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  return raw.flatMap((notice) => {
+    const file = store.file(String(notice?.fileId || ''));
+    const meeting = file && store.meeting(file.meeting_id);
+    if (!file || file.deleted || !meeting || meeting.hidden || seen.has(file.id)) return [];
+    seen.add(file.id);
+    return [{ fileId: file.id, path: storedPath(meeting.folder_date, file.category, file.name) }];
+  });
+}
+
 function publicConfig(store) {
   let tips = [];
-  let notices = [];
   try {
     tips = JSON.parse(store.setting('usageTips', '[]'));
   } catch {
     tips = [];
-  }
-  try {
-    notices = JSON.parse(store.setting('changeNotices', '[]'));
-  } catch {
-    notices = [];
   }
   return {
     today: folderToday(),
@@ -161,7 +174,7 @@ function publicConfig(store) {
     meetingDate: store.setting('meetingDate', ''),
     meetingTime: store.setting('meetingTime', ''),
     usageTips: Array.isArray(tips) ? tips : [],
-    changeNotices: Array.isArray(notices) ? notices : [],
+    changeNotices: fileChangeNotices(store),
   };
 }
 
@@ -224,7 +237,9 @@ function treeOf(store) {
         mimeType: 'application/vnd.google-apps.folder',
         isPdf: false,
         path: storedPath(meeting.folder_date, bucket),
-        children: files.filter((item) => item.file.category === bucket).map((item) => fileNode(item.meeting, item.file)),
+        children: files.filter((item) => item.file.category === bucket).map((item, index) => ({
+          ...fileNode(item.meeting, item.file), sortOrder: index + 1,
+        })),
       })),
     };
   });
@@ -590,6 +605,7 @@ export function createApiServer(root, options = {}) {
   const base = ensureRoot(root);
   const store = openStore(options.dbPath || defaultDbPath(base));
   importLegacy(store, base);
+  preserveExistingOrder(store);
   ensureDateFolders(store, base);
   const server = http.createServer((req, res) => {
     void handle(req, res, base, store);
@@ -805,6 +821,7 @@ async function handle(req, res, root, store) {
             meetingAutoTime: autoTimeOf(store),
             dateFolders: meetingFolders(store),
             meetings: meetingAdmin(store),
+            changeNotices: fileChangeNotices(store),
             usageTips: publicConfig(store).usageTips,
           },
           devices: store.deviceRows().map((row) => ({
@@ -928,17 +945,20 @@ async function handle(req, res, root, store) {
       writeOriginal(root, rel, bytes);
       const id = newId('f_');
       const stamp = nowIso();
-      store.insertFile({
-        id,
-        meeting_id: meeting.id,
-        category: bucket,
-        name,
-        sort_order: store.nextSort(meeting.id, bucket),
-        rel_path: rel,
-        size: bytes.length,
-        sha256: sha256(bytes),
-        created_at: stamp,
-        updated_at: stamp,
+      store.tx(() => {
+        store.insertFile({
+          id,
+          meeting_id: meeting.id,
+          category: bucket,
+          name,
+          sort_order: store.nextSort(meeting.id, bucket),
+          rel_path: rel,
+          size: bytes.length,
+          sha256: sha256(bytes),
+          created_at: stamp,
+          updated_at: stamp,
+        });
+        if (bucket === '별첨') sortUploadedAttachments(store, meeting.id);
       });
       store.putSetting('treeRefreshAt', stamp);
       sendJson(res, 200, { ok: true, data: { id, name, path: rel } });
@@ -948,7 +968,7 @@ async function handle(req, res, root, store) {
     if (req.method === 'POST' && replaceMatch) {
       requireAdmin(store, req);
       const file = store.file(replaceMatch[1]);
-      if (!file) fail(404, 'NOT_FOUND', '파일을 찾을 수 없습니다.');
+      if (!file || file.deleted) fail(404, 'NOT_FOUND', '파일을 찾을 수 없습니다.');
       const bytes = await readBody(req, MAX_PDF_BYTES);
       assertPdf(bytes);
       const name = req.headers['x-file-name'] ? safePdfName(req.headers['x-file-name']) : file.name;
@@ -1020,12 +1040,34 @@ async function handle(req, res, root, store) {
       requireAdmin(store, req);
       const body = JSON.parse((await readBody(req, 8192)).toString('utf8') || '{}');
       const ids = Array.isArray(body.fileIds) ? body.fileIds.map(String) : [];
+      const first = store.file(ids[0] || '');
+      if (!first || first.deleted || new Set(ids).size !== ids.length) fail(400, 'INVALID_INPUT', '정렬할 자료를 확인해 주세요.');
+      const files = store.filesFor(first.meeting_id).filter((file) => file.category === first.category);
+      if (files.length !== ids.length || files.some((file) => !ids.includes(file.id))) {
+        fail(400, 'INVALID_INPUT', '같은 회의와 구분의 자료 전체를 정렬해 주세요.');
+      }
       store.tx(() => {
         ids.forEach((id, index) => {
-          if (store.file(id)) store.setSort(id, index + 1);
+          store.setSort(id, index + 1);
         });
+        store.putSetting(manualOrderKey(first.meeting_id, first.category), '1');
+        store.putSetting('treeRefreshAt', nowIso());
       });
       sendJson(res, 200, { ok: true, data: { ok: true } });
+      return;
+    }
+    const noticeMatch = pathname.match(/^\/admin\/files\/([A-Za-z0-9_-]+)\/change-notice$/);
+    if (req.method === 'PUT' && noticeMatch) {
+      requireAdmin(store, req);
+      const file = store.file(noticeMatch[1]);
+      const meeting = file && store.meeting(file.meeting_id);
+      if (!file || file.deleted || !meeting || meeting.hidden) fail(404, 'NOT_FOUND', '자료를 찾을 수 없습니다.');
+      const body = JSON.parse((await readBody(req, 8192)).toString('utf8') || '{}');
+      if (typeof body.enabled !== 'boolean') fail(400, 'INVALID_INPUT', '변경 알림 설정을 확인해 주세요.');
+      const notices = fileChangeNotices(store).filter((notice) => notice.fileId !== file.id);
+      if (body.enabled) notices.push({ fileId: file.id, path: storedPath(meeting.folder_date, file.category, file.name) });
+      store.putSetting('changeNotices', JSON.stringify(notices));
+      sendJson(res, 200, { ok: true, data: { changeNotices: notices } });
       return;
     }
     if (req.method === 'POST' && pathname === '/admin/refresh') {

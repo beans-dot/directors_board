@@ -1,5 +1,6 @@
 import type {
   Annotation,
+  ChangeNotice,
   DateFolder,
   FilePayload,
   MeetingFolderRef,
@@ -285,6 +286,17 @@ export async function reorderMaterialFiles(fileIds: string[]): Promise<void> {
     body: JSON.stringify({ fileIds }),
   });
   await readJson(response);
+}
+
+export async function setMaterialChangeNotice(fileId: string, enabled: boolean): Promise<ChangeNotice[]> {
+  const response = await fetch(`${BASE}/admin/files/${encodeURIComponent(fileId)}/change-notice`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: requestHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ enabled }),
+  });
+  const data = await readJson<{ changeNotices: ChangeNotice[] }>(response);
+  return data.changeNotices;
 }
 
 export async function updateMeetingInfo(

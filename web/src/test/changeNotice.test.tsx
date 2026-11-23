@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { DriveNode, LocalFile, Profile } from '../api/types';
 import { TreeNode } from '../components/tree/TreeNode';
@@ -103,27 +103,20 @@ describe('change notices', () => {
     expect(screen.getByText('바뀜')).toBeTruthy();
   });
 
-  it('lets only admin open 설정 and turn on 변경알림 for one file', async () => {
+  it('hides download status and settings on both cached and uncached file rows', () => {
     useApp.setState({ profile: user });
+    useTree.setState({ localFiles: { [file.id]: true }, replacedIds: [] });
     const asUser = render(<TreeNode node={file} depth={2} />);
     expect(screen.queryByRole('button', { name: '예산 설정' })).toBeNull();
+    expect(screen.queryByText('✓')).toBeNull();
+    expect(asUser.container.querySelector('.tree-meta')).toBeNull();
     asUser.unmount();
 
     useApp.setState({ profile: admin, toasts: [] });
+    useTree.setState({ localFiles: {} });
     render(<TreeNode node={file} depth={2} />);
-    fireEvent.click(screen.getByRole('button', { name: '예산 설정' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: '변경알림' }));
-
-    await waitFor(() => {
-      expect(useTree.getState().changeNotices).toEqual([{ fileId: 'f1', path: file.path }]);
-      expect(screen.queryByRole('menuitem')).toBeNull();
-    });
-    expect(useApp.getState().toasts.some((item) => item.text.includes('변경 표시를 이 화면에 남겼습니다'))).toBe(true);
-
-    fireEvent.click(screen.getByRole('button', { name: '예산 설정' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: '변경알림 해제' }));
-    await waitFor(() => {
-      expect(useTree.getState().changeNotices).toEqual([]);
-    });
+    expect(screen.queryByRole('button', { name: '예산 설정' })).toBeNull();
+    expect(screen.queryByText('☁')).toBeNull();
+    expect(screen.getByRole('button', { name: '예산' }).getAttribute('title')).toBe('예산');
   });
 });

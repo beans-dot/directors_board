@@ -676,6 +676,21 @@ describe('meeting tree order', () => {
     ]);
   });
 
+  it('keeps the server order ahead of office and file names', () => {
+    const [sorted] = sortDriveTree([date([
+      folder('att', '별첨', [
+        { ...file('plan', '[기획] 계획.pdf', '26.10.30./별첨/[기획] 계획.pdf'), sortOrder: 2 },
+        { ...file('admin', '[행정] 보고.pdf', '26.10.30./별첨/[행정] 보고.pdf'), sortOrder: 1 },
+      ]),
+      folder('body', '본문', [
+        { ...file('first', '1_안건.pdf', '26.10.30./본문/1_안건.pdf'), sortOrder: 2 },
+        { ...file('last', '10_안건.pdf', '26.10.30./본문/10_안건.pdf'), sortOrder: 1 },
+      ]),
+    ])]);
+    expect(sorted.children?.[0].children?.map((child) => child.id)).toEqual(['last', 'first']);
+    expect(sorted.children?.[1].children?.map((child) => child.id)).toEqual(['admin', 'plan']);
+  });
+
   it('hides 별첨 and 규정 folders that contain no files', () => {
     const [sorted] = sortDriveTree([
       date([

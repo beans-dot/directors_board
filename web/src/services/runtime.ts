@@ -814,12 +814,6 @@ async function bytesForVersion(local: LocalFile, blobKey: string): Promise<Uint8
   return new Uint8Array(await stored.blob.arrayBuffer());
 }
 
-export async function setChangeNotice(node: DriveNode, enabled: boolean): Promise<void> {
-  const current = useTree.getState().changeNotices.filter((item) => item.fileId !== node.id);
-  applyChangeNotices(enabled ? [...current, { fileId: node.id, path: node.path }] : current);
-  useApp.getState().toast(enabled ? '이 파일의 변경 표시를 이 화면에 남겼습니다.' : '이 파일의 변경 표시를 숨겼습니다.');
-}
-
 export function ensurePdf(node: DriveNode): Promise<Uint8Array> {
   const existing = pdfInflight.get(node.id);
   if (existing) return existing;

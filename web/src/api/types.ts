@@ -20,6 +20,7 @@ export interface DriveNode {
   modifiedTime?: ISODate;
   md5Checksum?: string;
   size?: number;
+  sortOrder?: number;
   path: string;
   children?: DriveNode[];
 }
@@ -213,6 +214,7 @@ export interface AdminSettings {
   meetingAutoTime?: string;
   dateFolders?: MeetingFolderRef[];
   meetings?: MeetingRecord[];
+  changeNotices?: ChangeNotice[];
   usageTips?: string[];
 }
 
